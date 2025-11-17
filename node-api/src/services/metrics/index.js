@@ -412,11 +412,6 @@ const getSystemMetrics = async (req, res) => {
         const totalPopulation = rhIdentities.length; 
         const totalDivergentIdentities = divergentIdentityIds.size; 
         
-        // --- LOG DE DEBUG (Conforme solicitado) ---
-        console.log(`[Metrics Debug] Cálculo do Índice:`);
-        console.log(`- Total de Identidades (totalPopulation): ${totalPopulation}`);
-        console.log(`- Identidades com Divergência (totalDivergentIdentities): ${totalDivergentIdentities}`);
-        // --- FIM DO LOG DE DEBUG ---
 
         const calculatedIndex = totalPopulation > 0 
             ? ((totalPopulation - totalDivergentIdentities) / totalPopulation) * 100 
