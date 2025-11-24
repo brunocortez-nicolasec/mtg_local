@@ -1,6 +1,6 @@
 import Axios from "axios";
 
-const API_URL = process.env.REACT_APP_API_URL;
+const API_URL = process.env.REACT_APP_API_URL; 
 Axios.defaults.baseURL = API_URL;
 
 export class HttpService {
@@ -32,7 +32,6 @@ export class HttpService {
       headers: { 
         "Content-Type": "application/json",
         "Accept": "application/json",
-        'Access-Control-Allow-Credentials': true 
       },
     };
   };

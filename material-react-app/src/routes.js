@@ -37,9 +37,9 @@ const routes = [
   {
     type: "collapse",
     name: "Painel",
-    key: "mind-the-gap",
+    key: "dashboard",
     icon: <Icon fontSize="small">dashboard</Icon>,
-    route: "/mind-the-gap",
+    route: "/dashboard",
     component: <VisaoGeral />,
   },
   // O BLOCO "Perfil de Usuário" FOI REMOVIDO DAQUI

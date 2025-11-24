@@ -11,6 +11,11 @@ import Grid from "@mui/material/Grid";
 import Autocomplete from "@mui/material/Autocomplete";
 import Collapse from "@mui/material/Collapse";
 import Tooltip from "@mui/material/Tooltip";
+import Radio from "@mui/material/Radio";
+import RadioGroup from "@mui/material/RadioGroup";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import FormControl from "@mui/material/FormControl";
+import FormLabel from "@mui/material/FormLabel";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
@@ -20,29 +25,36 @@ import MDButton from "components/MDButton";
 import MDAlert from "components/MDAlert";
 
 const tipoFonteOptions = ["CSV", "DATABASE", "API"]; 
-
-// Opções de banco de dados (padronizado para o que o backend espera)
 const databaseTypeOptions = ["postgres", "mysql", "oracle", "sqlserver"]; 
 
 function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   
-  // Estado inicial alinhado com o schema.prisma (db_host, db_user, etc.)
   const defaultState = {
     name: "",
     origem: "RH", 
     description: "",
-    type_datasource: "CSV", // CSV, DATABASE, API
+    type_datasource: "CSV",
     
     // Campos CSV
     diretorio_hr: "", 
     
-    // Campos Banco de Dados
+    // Campos de Banco de Dados
+    db_type: "postgres", 
+    db_connection_type: "HOST",
+    
+    // DB: Método Host
     db_host: "",
-    db_port: "5432", // Default Postgres
+    db_port: "5432",
     db_name: "",
     db_user: "",
     db_password: "",
-    db_type: "postgres", // Default
+    
+    // DB: Método URL
+    db_url: "",
+
+    // DB: Validação de Tabela
+    db_schema: "public",
+    db_table: "",
     
     // Campos API 
     api_url: "",
@@ -54,13 +66,11 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   const [testStatus, setTestStatus] = useState({ show: false, color: "info", message: "" });
   const [isTesting, setIsTesting] = useState(false);
   
-  // API
   const api = axios.create({
     baseURL: "/",
     headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
   });
   
-  // Carrega dados iniciais ao abrir o modal
   useEffect(() => {
     if (open) {
       setTestStatus({ show: false });
@@ -76,13 +86,17 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
             // CSV
             diretorio_hr: config.diretorio_hr || "",
             
-            // DB (Mapeando corretamente para os campos do banco)
+            // DB
+            db_type: config.db_type || "postgres",
+            db_connection_type: config.db_connection_type || "HOST",
             db_host: config.db_host || "",
             db_port: config.db_port || "5432",
             db_name: config.db_name || "",
             db_user: config.db_user || "",
-            db_password: config.db_password || "", 
-            db_type: config.db_type || "postgres",
+            db_password: config.db_password || "",
+            db_url: config.db_url || "",
+            db_schema: config.db_schema || "public",
+            db_table: config.db_table || "",
         });
         
       } else {
@@ -91,11 +105,10 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
     }
   }, [initialData, open]);
 
-  // Reseta status de teste ao mudar de tipo
   useEffect(() => {
     setTestStatus({ show: false });
     setIsTesting(false);
-  }, [formData.type_datasource]);
+  }, [formData.type_datasource, formData.db_connection_type]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -132,29 +145,54 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   };
   
   const handleTestDatabase = async () => {
-    if (!formData.db_host || !formData.db_port || !formData.db_user || !formData.db_name) {
-       setTestStatus({ show: true, color: "warning", message: "Preencha Host, Porta, Banco e Usuário para testar." });
-       return;
+    if (!formData.db_table) {
+         setTestStatus({ show: true, color: "warning", message: "Informe o nome da Tabela para validar." });
+         return;
+    }
+
+    if (formData.db_connection_type === "HOST") {
+        if (!formData.db_host || !formData.db_port || !formData.db_user || !formData.db_name) {
+           setTestStatus({ show: true, color: "warning", message: "Preencha Host, Porta, Banco e Usuário." });
+           return;
+        }
+    } else {
+        if (!formData.db_url) {
+           setTestStatus({ show: true, color: "warning", message: "Preencha a URL de Conexão." });
+           return;
+        }
     }
     
     setIsTesting(true);
-    setTestStatus({ show: true, color: "info", message: "Conectando ao Banco de Dados..." });
+    setTestStatus({ show: true, color: "info", message: "Conectando ao Banco e obtendo colunas..." });
     
     try {
-        // CORREÇÃO AQUI: Enviando 'user' em vez de 'username'
         const response = await api.post("/datasources/test-db", { 
+            connectionType: formData.db_connection_type,
             host: formData.db_host,
             port: formData.db_port,
-            user: formData.db_user, // <-- O Backend espera 'user'
+            user: formData.db_user,
             password: formData.db_password,
             database: formData.db_name,
-            type: formData.db_type
+            url: formData.db_url,
+            type: formData.db_type,
+            schema: formData.db_schema,
+            table: formData.db_table
         });
+        
+        // ======================= INÍCIO DA ALTERAÇÃO =======================
+        // Mostra as colunas encontradas no alerta de sucesso
+        let successMsg = response.data.message;
+        if (response.data.columns && response.data.columns.length > 0) {
+             const colList = response.data.columns.slice(0, 5).join(", "); // Mostra as primeiras 5
+             const extra = response.data.columns.length > 5 ? `... (+${response.data.columns.length - 5})` : "";
+             successMsg += ` Colunas: [${colList}${extra}]`;
+        }
+        // ======================== FIM DA ALTERAÇÃO =========================
         
         setTestStatus({ 
             show: true, 
             color: "success", 
-            message: `Sucesso! Conexão estabelecida. Hora do servidor: ${response.data.serverTime || 'OK'}` 
+            message: successMsg
         });
     } catch (error) {
         const message = error.response?.data?.message || "Erro desconhecido.";
@@ -167,14 +205,11 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   const handleTestConnection = () => {
       if (formData.type_datasource === "CSV") return handleTestCSV();
       if (formData.type_datasource === "DATABASE") return handleTestDatabase();
-      // API logic here if needed
   }
 
   const getSaveDisabled = () => {
     if (!formData.name) return true;
     if (isTesting) return true;
-    
-    // Exige teste com sucesso antes de salvar
     if (formData.type_datasource !== null) {
       return testStatus.color !== "success";
     }
@@ -182,25 +217,23 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   };
   
   const handleSave = () => {
-    // Prepara o payload para salvar (SystemConfig / HRConfig)
     const payload = {
         name: formData.name,
         origem: "RH",
         description: formData.description,
         databaseType: formData.type_datasource, 
-        
-        // Campos específicos
         diretorio: formData.diretorio_hr, 
-        
-        // Novos campos DB
+        db_connection_type: formData.db_connection_type,
         db_host: formData.db_host,
         db_port: formData.db_port,
         db_name: formData.db_name,
         db_user: formData.db_user,
         db_password: formData.db_password,
         db_type: formData.db_type,
+        db_url: formData.db_url,
+        db_schema: formData.db_schema,
+        db_table: formData.db_table
     };
-
     onSave(payload); 
   };
   
@@ -231,20 +264,61 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                         fullWidth
                       />
                     </Grid>
-                    <Grid item xs={12} md={8}>
-                        <MDInput label="Host" name="db_host" value={formData.db_host} onChange={handleInputChange} fullWidth placeholder="localhost" />
+                    
+                    <Grid item xs={12}>
+                        <FormControl component="fieldset">
+                          <FormLabel component="legend" sx={{ fontSize: '0.875rem', mb: 1 }}>Método de Conexão</FormLabel>
+                          <RadioGroup
+                            row
+                            name="db_connection_type"
+                            value={formData.db_connection_type}
+                            onChange={handleInputChange}
+                          >
+                            <FormControlLabel value="HOST" control={<Radio />} label={<MDTypography variant="body2">Host / Porta</MDTypography>} />
+                            <FormControlLabel value="URL" control={<Radio />} label={<MDTypography variant="body2">URL de Conexão</MDTypography>} />
+                          </RadioGroup>
+                        </FormControl>
+                    </Grid>
+
+                    {formData.db_connection_type === 'HOST' ? (
+                        <>
+                            <Grid item xs={12} md={8}>
+                                <MDInput label="Host" name="db_host" value={formData.db_host} onChange={handleInputChange} fullWidth placeholder="localhost" />
+                            </Grid>
+                            <Grid item xs={12} md={4}>
+                                <MDInput label="Porta" name="db_port" value={formData.db_port} onChange={handleInputChange} fullWidth placeholder="5432" />
+                            </Grid>
+                            <Grid item xs={12} md={6}>
+                                <MDInput label="Nome do Banco" name="db_name" value={formData.db_name} onChange={handleInputChange} fullWidth />
+                            </Grid>
+                            <Grid item xs={12} md={6}>
+                                <MDInput label="Usuário" name="db_user" value={formData.db_user} onChange={handleInputChange} fullWidth />
+                            </Grid>
+                            <Grid item xs={12}>
+                                <MDInput label="Senha" name="db_password" value={formData.db_password} type="password" onChange={handleInputChange} fullWidth />
+                            </Grid>
+                        </>
+                    ) : (
+                        <Grid item xs={12}>
+                            <MDInput 
+                                label="URL de Conexão (Connection String)" 
+                                name="db_url" 
+                                value={formData.db_url} 
+                                onChange={handleInputChange} 
+                                fullWidth 
+                                placeholder="postgresql://user:password@localhost:5432/mydb"
+                            />
+                        </Grid>
+                    )}
+
+                    <Grid item xs={12}>
+                         <MDBox mt={1} mb={1}><MDTypography variant="caption" fontWeight="bold">Alvo da Importação</MDTypography></MDBox>
                     </Grid>
                     <Grid item xs={12} md={4}>
-                        <MDInput label="Porta" name="db_port" value={formData.db_port} onChange={handleInputChange} fullWidth placeholder="5432" />
+                        <MDInput label="Schema" name="db_schema" value={formData.db_schema} onChange={handleInputChange} fullWidth placeholder="public" />
                     </Grid>
-                    <Grid item xs={12} md={6}>
-                        <MDInput label="Nome do Banco" name="db_name" value={formData.db_name} onChange={handleInputChange} fullWidth />
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                        <MDInput label="Usuário" name="db_user" value={formData.db_user} onChange={handleInputChange} fullWidth />
-                    </Grid>
-                    <Grid item xs={12}>
-                        <MDInput label="Senha" name="db_password" value={formData.db_password} type="password" onChange={handleInputChange} fullWidth />
+                    <Grid item xs={12} md={8}>
+                        <MDInput label="Tabela Principal" name="db_table" value={formData.db_table} onChange={handleInputChange} fullWidth placeholder="Ex: tb_funcionarios" required error={!formData.db_table} />
                     </Grid>
                 </>
             );

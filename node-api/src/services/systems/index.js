@@ -114,12 +114,15 @@ const getDataSourceById = async (req, res) => {
  */
 const createDataSource = async (req, res) => {
   
+  // Extraindo todos os campos do body (incluindo DB)
   const { 
     name, origem, databaseType, description, 
     diretorio, // Campo do RH
     systemId, 
     tipo_fonte_contas, diretorio_contas, 
-    tipo_fonte_recursos, diretorio_recursos 
+    tipo_fonte_recursos, diretorio_recursos,
+    // Novos campos DB:
+    db_connection_type, db_host, db_port, db_name, db_user, db_password, db_type, db_url, db_schema, db_table
   } = req.body;
 
   const data = {
@@ -149,14 +152,12 @@ const createDataSource = async (req, res) => {
     }
 
     if (data.origem_datasource === "SISTEMA") {
-      if (!systemId) {
-        return res.status(400).json({ message: "O 'Sistema de Destino' (systemId) é obrigatório." });
-      }
+      // Nota: systemId pode ser nulo agora, pois criaremos se não existir
       if (!tipo_fonte_contas || !["CSV", "DATABASE", "API"].includes(tipo_fonte_contas)) {
-         return res.status(400).json({ message: "O 'Tipo de Fonte (Contas)' é obrigatório (CSV, DATABASE, ou API)." });
+          return res.status(400).json({ message: "O 'Tipo de Fonte (Contas)' é obrigatório (CSV, DATABASE, ou API)." });
       }
       if (!tipo_fonte_recursos || !["CSV", "DATABASE", "API"].includes(tipo_fonte_recursos)) {
-         return res.status(400).json({ message: "O 'Tipo de Fonte (Recursos)' é obrigatório (CSV, DATABASE, ou API)." });
+          return res.status(400).json({ message: "O 'Tipo de Fonte (Recursos)' é obrigatório (CSV, DATABASE, ou API)." });
       }
     }
 
@@ -170,15 +171,25 @@ const createDataSource = async (req, res) => {
         },
       });
 
+      // Objeto de configuração de DB reutilizável
+      const dbConfig = {
+        db_connection_type: db_connection_type || 'HOST',
+        db_host, db_port, db_name, db_user, db_password, 
+        db_type: db_type || 'postgres',
+        db_url, db_schema, db_table
+      };
+
       switch (data.origem_datasource) {
         case "RH":
           await tx.hRConfig.create({
             data: {
               dataSourceId: dataSource.id,
               diretorio_hr: diretorio, 
+              ...dbConfig
             }
           });
           break;
+          
         case "IDM":
           await tx.iDMConfig.create({
             data: {
@@ -188,18 +199,41 @@ const createDataSource = async (req, res) => {
             }
           });
           break;
-        case "SISTEMA":
+          
+        case "SISTEMA": {
+          // Lógica de criação Atômica do Sistema no Catálogo
+          let finalSystemId = systemId ? parseInt(systemId, 10) : null;
+          
+          if (!finalSystemId) {
+             // Verifica se já existe por nome para evitar duplicidade
+             const existingSys = await tx.system.findUnique({ where: { name_system: data.name_datasource } });
+             if (existingSys) {
+                 finalSystemId = existingSys.id;
+             } else {
+                 const newSys = await tx.system.create({
+                     data: {
+                         name_system: data.name_datasource,
+                         description_system: data.description_datasource
+                     }
+                 });
+                 finalSystemId = newSys.id;
+             }
+          }
+
           await tx.systemConfig.create({
             data: {
               dataSourceId: dataSource.id,
-              systemId: parseInt(systemId, 10), 
+              systemId: finalSystemId, 
               tipo_fonte_contas: tipo_fonte_contas,
               diretorio_contas: diretorio_contas, 
               tipo_fonte_recursos: tipo_fonte_recursos,
-              diretorio_recursos: diretorio_recursos, 
+              diretorio_recursos: diretorio_recursos,
+              ...dbConfig
             }
           });
           break;
+        }
+          
         default:
           throw new Error("Origem de DataSource inválida.");
       }
@@ -245,7 +279,9 @@ const updateDataSource = async (req, res) => {
     diretorio, 
     systemId, 
     tipo_fonte_contas, diretorio_contas, 
-    tipo_fonte_recursos, diretorio_recursos 
+    tipo_fonte_recursos, diretorio_recursos,
+    // Novos campos DB
+    db_connection_type, db_host, db_port, db_name, db_user, db_password, db_type, db_url, db_schema, db_table
   } = req.body;
 
   const data = {
@@ -293,12 +329,25 @@ const updateDataSource = async (req, res) => {
         data: data,
       });
 
+      const dbConfig = {
+        db_connection_type: db_connection_type || 'HOST',
+        db_host, db_port, db_name, db_user, db_password, 
+        db_type: db_type || 'postgres', db_url, db_schema, db_table
+      };
+
       switch (data.origem_datasource) {
         case "RH":
           await tx.hRConfig.upsert({
             where: { dataSourceId: dataSourceId },
-            update: { diretorio_hr: diretorio },
-            create: { dataSourceId: dataSourceId, diretorio_hr: diretorio }
+            update: { 
+                diretorio_hr: diretorio,
+                ...dbConfig
+            },
+            create: { 
+                dataSourceId: dataSourceId, 
+                diretorio_hr: diretorio,
+                ...dbConfig
+            }
           });
           break;
         case "IDM":
@@ -312,7 +361,8 @@ const updateDataSource = async (req, res) => {
               tipo_fonte_contas: tipo_fonte_contas,
               diretorio_contas: diretorio_contas,     
               tipo_fonte_recursos: tipo_fonte_recursos,
-              diretorio_recursos: diretorio_recursos,  
+              diretorio_recursos: diretorio_recursos,
+              ...dbConfig  
             },
             create: {
               dataSourceId: dataSourceId,
@@ -320,7 +370,8 @@ const updateDataSource = async (req, res) => {
               tipo_fonte_contas: tipo_fonte_contas,
               diretorio_contas: diretorio_contas,     
               tipo_fonte_recursos: tipo_fonte_recursos,
-              diretorio_recursos: diretorio_recursos,  
+              diretorio_recursos: diretorio_recursos,
+              ...dbConfig  
             }
           });
           break;
@@ -362,7 +413,6 @@ const deleteDataSource = async (req, res) => {
   }
   
   try {
-    // ======================= INÍCIO DA CORREÇÃO =======================
     // 1. Busca a Fonte de Dados E o SystemConfig associado (se houver)
     const dataSource = await prisma.dataSource.findFirst({
       where: { id: dataSourceId, userId: userIdInt },
@@ -409,7 +459,6 @@ const deleteDataSource = async (req, res) => {
         }
       }
     });
-    // ======================== FIM DA CORREÇÃO =========================
 
     res.status(204).send();
     
@@ -428,7 +477,6 @@ const deleteDataSource = async (req, res) => {
  * @access  Private
  */
 const saveOrUpdateMapping = async (req, res) => {
-  // ... (Inalterado)
   const dataSourceId = parseInt(req.params.id, 10);
   const mappingData = req.body; 
   const userIdInt = parseInt(req.user.id, 10);
@@ -493,7 +541,6 @@ const saveOrUpdateMapping = async (req, res) => {
  * @access  Private
  */
 const getSystemData = async (req, res) => {
-  // ... (Inalterado)
   const dataSourceId = parseInt(req.params.id, 10);
   const userIdInt = parseInt(req.user.id, 10);
 
@@ -544,7 +591,7 @@ const getSystemData = async (req, res) => {
         break;
       default:
         throw new Error("Origem de dados desconhecida.");
-AN }
+    }
     
     res.status(200).json(data);
 
@@ -587,10 +634,6 @@ const clearSystemData = async (req, res) => {
         });
         break;
       case "SISTEMA":
-// ======================= INÍCIO DA ALTERAÇÃO =======================
-        // Limpa AMBOS (Assignments, Accounts e Resources)
-       // A lógica do 'where' está correta e espelha a lógica de importação 
-       // (limpa tudo do 'System' (Catálogo) ao qual esta fonte pertence)
         await prisma.assignment.deleteMany({
           where: {
             account: {
@@ -613,7 +656,6 @@ const clearSystemData = async (req, res) => {
           }
         });
         
-        // ADICIONADO: Limpa os Recursos
         await prisma.resource.deleteMany({
           where: {
             system: {
@@ -623,7 +665,6 @@ const clearSystemData = async (req, res) => {
             }
           }
         });
-// ======================== FIM DA ALTERAÇÃO =========================
         break;
       default:
         throw new Error("Origem de dados desconhecida.");
@@ -637,7 +678,6 @@ const clearSystemData = async (req, res) => {
   }
 };
 
-// ======================= INÍCIO DA ADIÇÃO (Rota /all-resources) =======================
 /**
  * @route   GET /systems/all-resources
  * @desc    Busca TODOS os Recursos (Perfis de Sistema)
@@ -650,8 +690,6 @@ const getAllResources = async (req, res) => {
   }
 
   try {
-    // Busca todos os recursos que pertencem a sistemas
-    // que por sua vez pertencem a dataSources deste usuário.
     const resources = await prisma.resource.findMany({
       where: {
         system: {
@@ -681,29 +719,17 @@ const getAllResources = async (req, res) => {
     res.status(500).json({ message: "Erro interno do servidor." });
   }
 };
-// ======================== FIM DA ADIÇÃO (Rota /all-resources) =========================
 
 
-// ======================= INÍCIO DA ALTERAÇÃO (Ordem das Rotas) =======================
 // Definindo as rotas
-// Rotas específicas (com sub-caminhos) DEVEM vir antes das rotas genéricas /:id
-
 router.get("/", passport.authenticate("jwt", { session: false }), getDataSources);
 router.post("/", passport.authenticate("jwt", { session: false }), createDataSource);
-
-// Rota Específica (NOVA)
 router.get("/all-resources", passport.authenticate("jwt", { session: false }), getAllResources);
-
-// Rotas Específicas
 router.get("/:id/data", passport.authenticate("jwt", { session: false }), getSystemData);
 router.delete("/:id/data", passport.authenticate("jwt", { session: false }), clearSystemData);
 router.post("/:id/mapping", passport.authenticate("jwt", { session: false }), saveOrUpdateMapping);
-
-// Rotas Genéricas (devem vir por último)
 router.get("/:id", passport.authenticate("jwt", { session: false }), getDataSourceById);
 router.patch("/:id", passport.authenticate("jwt", { session: false }), updateDataSource);
 router.delete("/:id", passport.authenticate("jwt", { session: false }), deleteDataSource);
-
-// ======================== FIM DA ALTERAÇÃO (Ordem das Rotas) =========================
 
 export default router;

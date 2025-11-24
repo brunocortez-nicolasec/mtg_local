@@ -7,7 +7,7 @@ import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import Autocomplete from "@mui/material/Autocomplete";
-import TextField from "@mui/material/TextField"; // (Necessário para o Autocomplete)
+import TextField from "@mui/material/TextField"; 
 import FormControlLabel from "@mui/material/FormControlLabel"; 
 import Switch from "@mui/material/Switch"; 
 import CircularProgress from "@mui/material/CircularProgress"; 
@@ -23,7 +23,7 @@ import Dropzone from "./Dropzone";
 
 function ImportCard({ 
   onProcessUpload, 
-  onProcessDirectory, 
+  onProcessDirectory, // Essa função no pai (index.js) decide se chama /sync-db ou /process-directory
   dataSourceOptions,
   history, 
   isLoading, 
@@ -46,21 +46,10 @@ function ImportCard({
     if (!selectedOrigem) {
       return [];
     }
-    // Filtra DataSources pela Origem E se elas têm um tipo de conexão CSV (por enquanto)
-    return dataSourceOptions.filter(ds => {
-        if (ds.origem_datasource !== selectedOrigem) return false;
-        
-        if (selectedOrigem === "RH") return ds.hrConfig?.diretorio_hr;
-        if (selectedOrigem === "IDM") return false; // IDM não é CSV
-        if (selectedOrigem === "SISTEMA") {
-          // Inclui se *qualquer* uma das configs for CSV
-          return ds.systemConfig?.tipo_fonte_contas === "CSV" || ds.systemConfig?.tipo_fonte_recursos === "CSV";
-        }
-        return false;
-    });
+    return dataSourceOptions.filter(ds => ds.origem_datasource === selectedOrigem);
   }, [dataSourceOptions, selectedOrigem]);
 
-  // Handler para o PRIMEIRO dropdown (Origem)
+  // Handlers
   const handleOrigemChange = (event, newValue) => {
     setSelectedOrigem(newValue);
     setSelectedDataSource(null); 
@@ -68,14 +57,12 @@ function ImportCard({
     setSelectedFile(null); 
   };
 
-  // Handler para o SEGUNDO dropdown (Fonte de Dados)
   const handleDataSourceChange = (event, newValue) => {
     setSelectedDataSource(newValue);
     setProcessingTarget("CONTAS"); 
     setSelectedFile(null); 
   };
   
-  // Handler para o TERCEIRO dropdown (Contas/Recursos)
   const handleProcessingTargetChange = (event, newTarget) => {
     if (newTarget !== null) {
       setProcessingTarget(newTarget);
@@ -83,8 +70,7 @@ function ImportCard({
     }
   };
 
-
-  // Lógica de verificação de mapeamento (atualizada para o fluxo de 3 passos)
+  // Lógica de verificação de mapeamento
   const [isMappingMissing, setIsMappingMissing] = useState(false);
   const [mappingMissingMessage, setMappingMissingMessage] = useState("");
 
@@ -98,48 +84,40 @@ function ImportCard({
     const { origem_datasource, mappingRH, mappingIDM, mappingSystem } = selectedDataSource;
     let missing = false;
     let message = 'O mapeamento de dados para esta fonte não foi configurado.';
-    let missingFields = []; // Helper para mostrar *quais* campos estão faltando
+    let missingFields = [];
 
     if (origem_datasource === "RH") {
       const map = mappingRH || {};
       if (!map.identity_id_hr) missingFields.push("identity_id_hr");
       if (!map.email_hr) missingFields.push("email_hr");
       if (!map.status_hr) missingFields.push("status_hr");
-      
       if (missingFields.length > 0) {
         missing = true;
-        message = `Mapeamento de RH incompleto. Campos obrigatórios pendentes: [${missingFields.join(', ')}]`;
+        message = `Mapeamento de RH incompleto.`;
       }
     } else if (origem_datasource === "IDM") {
       const map = mappingIDM || {};
       if (!map.identity_id_idm) missingFields.push("identity_id_idm");
-      if (!map.email_idm) missingFields.push("email_idm");
-      if (!map.status_idm) missingFields.push("status_idm");
-      
       if (missingFields.length > 0) {
         missing = true;
-        message = `Mapeamento de IDM incompleto. Campos obrigatórios pendentes: [${missingFields.join(', ')}]`;
+        message = `Mapeamento de IDM incompleto.`;
       }
     } else if (origem_datasource === "SISTEMA") {
       const map = mappingSystem || {};
-      
       if (processingTarget === "CONTAS") {
         if (!map.accounts_id_in_system) missingFields.push("accounts_id_in_system");
         if (!map.accounts_email) missingFields.push("accounts_email");
-        if (!map.accounts_identity_id) missingFields.push("accounts_identity_id");
-        // Não verificamos 'accounts_resource_name' pois ele é opcional para o mapeamento
-        
+        // if (!map.accounts_identity_id) missingFields.push("accounts_identity_id"); <--- 🚨 LINHA REMOVIDA
         if (missingFields.length > 0) {
             missing = true;
-            message = `Mapeamento de "Contas" incompleto. Campos obrigatórios pendentes: [${missingFields.join(', ')}]`;
+            message = `Mapeamento de "Contas" incompleto.`;
         }
       } else if (processingTarget === "RECURSOS") {
         if (!map.resources_name) missingFields.push("resources_name");
         if (!map.resources_permissions) missingFields.push("resources_permissions");
-        
         if (missingFields.length > 0) {
             missing = true;
-            message = `Mapeamento de "Recursos" incompleto. Campos obrigatórios pendentes: [${missingFields.join(', ')}]`;
+            message = `Mapeamento de "Recursos" incompleto.`;
         }
       }
     }
@@ -147,20 +125,14 @@ function ImportCard({
     setIsMappingMissing(missing);
     setMappingMissingMessage(message);
 
-  }, [selectedDataSource, processingTarget]); // Agora depende do target
+  }, [selectedDataSource, processingTarget]);
 
   // Verifica se os RECURSOS para o sistema selecionado já foram importados com sucesso
+  // (Pré-requisito para importar contas)
   const hasSuccessfullyImportedResources = useMemo(() => {
-    if (!selectedDataSource || selectedDataSource.origem_datasource !== "SISTEMA") {
-      return true; // Não se aplica a RH ou IDM, então não trava
-    }
-    
+    if (!selectedDataSource || selectedDataSource.origem_datasource !== "SISTEMA") return true; 
     const currentSystemId = selectedDataSource.systemConfig?.systemId;
-    if (!currentSystemId) {
-      return false; // Fonte de dados ainda não está 100% configurada
-    }
-
-    // Procura no histórico por uma importação BEM SUCEDIDA de RECURSOS para este systemId
+    if (!currentSystemId) return false; 
     return history.some(log =>
       log.dataSource?.systemConfig?.systemId === currentSystemId &&
       log.processingTarget === "RECURSOS" &&
@@ -168,6 +140,46 @@ function ImportCard({
     );
   }, [selectedDataSource, history]);
 
+
+  // ======================= LÓGICA DE DETECÇÃO DE TIPO (CORRIGIDA) =======================
+  const currentSourceType = useMemo(() => {
+    if (!selectedDataSource) return null;
+    
+    const { origem_datasource, type_datasource, hrConfig, systemConfig } = selectedDataSource;
+
+    if (origem_datasource === "IDM") return "API"; // IDM é sempre API
+
+    if (origem_datasource === "RH") {
+      // 1. Prioriza o campo type_datasource (CSV, DATABASE, API)
+      if (type_datasource && type_datasource !== 'CSV') return type_datasource;
+      
+      // 2. Verifica fallback para DB (se configs de host/url estiverem preenchidas)
+      if (hrConfig?.db_host || hrConfig?.db_url) return "DATABASE";
+      
+      return "CSV"; 
+    }
+    
+    // SISTEMA: Verifica o tipo específico da aba (Contas ou Recursos)
+    if (origem_datasource === "SISTEMA" && systemConfig) {
+      // Retorna o valor literal do campo (que deve ser CSV, DATABASE ou API)
+      const type = processingTarget === "CONTAS" 
+        ? systemConfig.tipo_fonte_contas 
+        : systemConfig.tipo_fonte_recursos;
+      return type || "CSV";
+    }
+    
+    return "CSV"; // Fallback
+  }, [selectedDataSource, processingTarget]);
+  
+  // Se for Banco de Dados ou API, NÃO permite upload manual
+  const allowUploadMode = currentSourceType === "CSV";
+  
+  // Força o modo "directory" (automático/sincronização) se não for CSV
+  useEffect(() => {
+    if (!allowUploadMode) {
+      setImportMode("directory");
+    }
+  }, [allowUploadMode]);
 
   const handleModeChange = (event) => {
     setImportMode(event.target.checked ? "upload" : "directory");
@@ -178,51 +190,41 @@ function ImportCard({
     const callback = (errorOcurred = false) => {
       if (!errorOcurred) {
         setSelectedFile(null);
-        setSelectedDataSource(null);
-        setSelectedOrigem(null);
-        setProcessingTarget("CONTAS");
       }
     };
 
     if (!selectedDataSource) return;
 
     if (importMode === "upload") {
+      // Rota de Upload manual (handleProcessUpload -> /imports/upload)
       onProcessUpload(selectedFile, selectedDataSource.id, processingTarget, callback);
     } else {
+      // Rota de Sincronização/Diretório (onProcessDirectory -> handleTriggerProcessing)
+      // O pai (index.js) decide se chama /sync-db ou /process-directory
       onProcessDirectory(selectedDataSource.id, processingTarget, callback);
     }
   };
-  
-  // Verifica o tipo de fonte correto (CSV, DB, etc.)
-  const currentSourceType = useMemo(() => {
-    if (!selectedDataSource) return null;
-    if (selectedOrigem === "RH") return selectedDataSource.hrConfig?.diretorio_hr ? "CSV" : null;
-    if (selectedOrigem === "IDM") return "API"; // IDM é sempre API
-    if (selectedOrigem === "SISTEMA" && selectedDataSource.systemConfig) {
-      return processingTarget === "CONTAS" 
-        ? selectedDataSource.systemConfig.tipo_fonte_contas 
-        : selectedDataSource.systemConfig.tipo_fonte_recursos;
-    }
-    return null;
-  }, [selectedDataSource, selectedOrigem, processingTarget]);
-  
-  // O modo de upload (dropzone) só é permitido se o tipo da fonte for CSV
-  const allowUploadMode = currentSourceType === "CSV";
-  // Se não for CSV, força o modo "directory" (que agora significa "via conexão")
-  useEffect(() => {
-    if (!allowUploadMode) {
-      setImportMode("directory");
-    }
-  }, [allowUploadMode]);
-
 
   const isButtonDisabled = 
     isLoading || 
     !selectedDataSource || 
     (importMode === "upload" && !selectedFile) ||
     isMappingMissing ||
-    // A TRAVA: Desabilita se o alvo for CONTAS e os RECURSOS ainda não foram importados
     (selectedOrigem === "SISTEMA" && processingTarget === "CONTAS" && !hasSuccessfullyImportedResources);
+
+  // Labels Dinâmicos
+  const getButtonLabel = () => {
+      if (importMode === 'upload') return "Processar Arquivo";
+      if (currentSourceType === 'DATABASE') return "Sincronizar Agora"; // Botão para DB
+      if (currentSourceType === 'API') return "Sincronizar via API";
+      return "Processar via Diretório"; // Botão para CSV no servidor
+  };
+
+  const getButtonIcon = () => {
+      if (currentSourceType === 'DATABASE' || currentSourceType === 'API') return "sync";
+      return "play_arrow";
+  };
+  // 
 
   return (
     <Card>
@@ -232,7 +234,7 @@ function ImportCard({
         display="flex" justifyContent="space-between" alignItems="center"
       >
         <MDTypography variant="h6" color="white">
-          {currentSourceType === "CSV" ? "Nova Importação de CSV" : "Novo Processamento de Dados"}
+          {currentSourceType === "DATABASE" ? "Sincronização de Banco de Dados" : (currentSourceType === "API" ? "Sincronização via API" : "Nova Importação")}
         </MDTypography>
         <MDButton variant="contained" color="dark" onClick={onOpenTemplate}>
           Ajuda
@@ -243,51 +245,28 @@ function ImportCard({
           {/* Lado Esquerdo: Controles */}
           <Grid item xs={12} md={6}>
             <MDBox mb={2}>
-              {/* Dropdown 1: Origem */}
               <Autocomplete 
                 options={origemOptions}
                 value={selectedOrigem}
                 disabled={isLoading} 
                 onChange={handleOrigemChange} 
-                ListboxProps={{
-                  sx: {
-                    backgroundColor: darkMode ? "grey.800" : "white", // Cor de fundo do menu
-                  },
-                }}
-                renderInput={(params) => (
-                  <MDInput 
-                    {...params} 
-                    label="1. Selecione a Origem" 
-                    variant="outlined" // Mantém o estilo original do template
-                  />
-                )} 
+                ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
+                renderInput={(params) => <MDInput {...params} label="1. Selecione a Origem" variant="outlined" />} 
               />
             </MDBox>
             
             <MDBox mb={2}>
-              {/* Dropdown 2: Fonte de Dados */}
               <Autocomplete 
                 options={filteredDataSources}
                 getOptionLabel={(option) => option.name_datasource || "Nome não encontrado"}
                 value={selectedDataSource}
                 disabled={isLoading || !selectedOrigem} 
                 onChange={handleDataSourceChange} 
-                ListboxProps={{
-                  sx: {
-                    backgroundColor: darkMode ? "grey.800" : "white",
-                  },
-                }}
-                renderInput={(params) => (
-                  <MDInput 
-                    {...params} 
-                    label="2. Selecione a Fonte de Dados" 
-                    variant="outlined" // Mantém o estilo original do template
-                  />
-                )} 
+                ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
+                renderInput={(params) => <MDInput {...params} label="2. Selecione a Fonte de Dados" variant="outlined" />} 
               />
             </MDBox>
 
-            {/* Seletor 3: Contas/Recursos (Agora é um Dropdown) */}
             {selectedOrigem === "SISTEMA" && selectedDataSource && (
               <MDBox mb={2}>
                 <Autocomplete 
@@ -295,46 +274,29 @@ function ImportCard({
                   value={processingTarget}
                   disabled={isLoading} 
                   onChange={handleProcessingTargetChange}
-                  getOptionDisabled={(option) => 
-                    option === "CONTAS" && !hasSuccessfullyImportedResources
-                  }
-                  ListboxProps={{
-                    sx: {
-                      backgroundColor: darkMode ? "grey.800" : "white",
-                    },
-                  }}
+                  getOptionDisabled={(option) => option === "CONTAS" && !hasSuccessfullyImportedResources}
+                  ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                   renderInput={(params) => (
                     <MDInput 
                       {...params} 
                       label="3. Selecione o Alvo do Processamento" 
-                      variant="outlined" // Mantém o estilo original do template
-                      helperText={
-                        !hasSuccessfullyImportedResources 
-                        ? "Importe 'RECURSOS' primeiro para habilitar 'CONTAS'." 
-                        : ""
-                      }
-                      FormHelperTextProps={{ 
-                        sx: { marginLeft: 1, color: 'warning.main', fontWeight: 'bold' } 
-                      }}
+                      variant="outlined" 
+                      helperText={!hasSuccessfullyImportedResources ? "Importe 'RECURSOS' primeiro para habilitar 'CONTAS'." : ""}
+                      FormHelperTextProps={{ sx: { marginLeft: 1, color: 'warning.main', fontWeight: 'bold' } }}
                     />
                   )} 
                 />
               </MDBox>
             )}
             
-            {/* Alerta de Mapeamento Faltando */}
             {isMappingMissing && (
               <MDAlert color="warning" sx={{ mt: 2, mb: 1 }}>
-                <MDTypography variant="body2" color="white" fontWeight="medium">
-                  Mapeamento Pendente: 
-                </MDTypography>
-                <MDTypography variant="body2" color="white">
-                  {mappingMissingMessage}
-                </MDTypography>
+                <MDTypography variant="body2" color="white" fontWeight="medium">Mapeamento Pendente: </MDTypography>
+                <MDTypography variant="body2" color="white">{mappingMissingMessage}</MDTypography>
               </MDAlert>
             )}
 
-            {/* Switch de Modo (Upload) */}
+            {/* Só mostra o switch se for CSV */}
             {allowUploadMode && (
               <MDBox mb={2}>
                 <FormControlLabel
@@ -343,44 +305,20 @@ function ImportCard({
                       checked={importMode === "upload"} 
                       onChange={handleModeChange} 
                       disabled={isLoading}
-                      sx={{
-                        "& .MuiSwitch-thumb": {
-                          backgroundColor: darkMode ? "white" : "white", // Cor da bolinha
-                        },
-                        "& .Mui-checked+.MuiSwitch-track": {
-                          backgroundColor: darkMode ? "info" : "info", // Cor do trilho (ligado)
-                        },
-                      }}
+                      sx={{ "& .MuiSwitch-thumb": { backgroundColor: "white" }, "& .Mui-checked+.MuiSwitch-track": { backgroundColor: "info.main" } }}
                     />
                   }
-                  label={
-                    <MDTypography variant="button" color="text">
-                      Fazer upload manual de arquivo
-                    </MDTypography>
-                  }
+                  label={<MDTypography variant="button" color="text">Fazer upload manual de arquivo</MDTypography>}
                 />
               </MDBox>
             )}
             
-            {/* Botão de Processar */}
-            <MDButton 
-              variant="gradient" color="info" fullWidth
-              onClick={handleProcessClick} 
-              disabled={isButtonDisabled}
-            >
-              {isLoading ? (
-                <CircularProgress size={20} color="white" />
-              ) : (
-                <>
-                  <Icon>play_arrow</Icon>&nbsp;
-                  {importMode === 'upload' ? "Processar Arquivo" : 
-                    (currentSourceType === "CSV" ? "Processar via Diretório" : "Processar via Conexão")}
-                </>
-              )}
+            <MDButton variant="gradient" color="info" fullWidth onClick={handleProcessClick} disabled={isButtonDisabled}>
+              {isLoading ? <CircularProgress size={20} color="white" /> : <><Icon>{getButtonIcon()}</Icon>&nbsp;{getButtonLabel()}</>}
             </MDButton>
           </Grid>
 
-          {/* Lado Direito: Dropzone (Condicional) */}
+          {/* Lado Direito: Dropzone ou Painel Informativo */}
           <Grid item xs={12} md={6}>
             {importMode === 'upload' && allowUploadMode ? (
               <Dropzone 
@@ -391,15 +329,13 @@ function ImportCard({
                 disabledText="Selecione uma fonte de dados primeiro"
               />
             ) : (
-// ======================= INÍCIO DA CORREÇÃO (Estilo do Bloco) =======================
+              // Painel Informativo (para Diretório CSV, DB ou API)
               <MDBox
-                // Adiciona flex para centralizar o conteúdo, imitando o Dropzone
                 display="flex"
                 flexDirection="column"
                 justifyContent="center"
                 alignItems="center"
                 sx={(theme) => ({
-                  // Estilos copiados diretamente do Dropzone.js
                   border: "2px dashed",
                   borderColor: theme.palette.grey[500],
                   borderRadius: "10px",
@@ -407,27 +343,25 @@ function ImportCard({
                   padding: "24px",
                   cursor: "default",
                   transition: "all 0.3s ease-in-out",
-                  backgroundColor: "transparent", // <-- A CHAVE: usa o fundo do Card
-                  minHeight: "150px", // Garante altura mínima
+                  backgroundColor: "transparent", 
+                  minHeight: "200px", 
                 })}
               >
-                <Icon
-                  fontSize="large"
-                  // Corrigido para "info" para corresponder ao ícone de upload
-                  sx={{ color: 'info.main' }}
-                >
-                  {currentSourceType === "CSV" ? "folder_open" : "settings_ethernet"}
+                <Icon fontSize="large" sx={{ color: 'info.main', fontSize: '3rem !important', mb: 2 }}>
+                  {currentSourceType === "DATABASE" ? "storage" : (currentSourceType === "API" ? "cloud_sync" : "folder_open")}
                 </Icon>
-                <MDTypography variant="h6" mt={1} fontSize="1rem" color="text"> {/* Corrigido para color="text" */}
-                  {currentSourceType === "CSV" ? "Processamento via Diretório" : "Processamento via Conexão"}
+                <MDTypography variant="h6" mt={1} fontSize="1.1rem" color="text">
+                  {currentSourceType === "DATABASE" ? "Sincronização de Banco de Dados" : (currentSourceType === "API" ? "Sincronização via API" : "Processamento via Diretório")}
                 </MDTypography>
-                <MDTypography variant="body2" color="text" align="center" mt={1}>
-                  {currentSourceType === "CSV" 
-                    ? "O arquivo será lido do diretório configurado na Fonte de Dados."
-                    : "Os dados serão buscados da conexão de banco de dados configurada."}
+                <MDTypography variant="body2" color="text" align="center" mt={1} px={3}>
+                  {currentSourceType === "DATABASE" 
+                    ? `Os dados serão extraídos diretamente da tabela configurada no banco de dados de ${selectedDataSource ? selectedDataSource.name_datasource : 'origem'}.`
+                    : (currentSourceType === "API" 
+                        ? "Os dados serão buscados via requisição à API configurada."
+                        : "O sistema buscará o arquivo CSV mais recente no diretório configurado no servidor.")
+                  }
                 </MDTypography>
               </MDBox>
-// ======================== FIM DA CORREÇÃO (Estilo do Bloco) =========================
             )}
           </Grid>
         </Grid>
@@ -436,7 +370,6 @@ function ImportCard({
   );
 }
 
-// PropTypes atualizados
 ImportCard.propTypes = {
   onProcessUpload: PropTypes.func.isRequired,
   onProcessDirectory: PropTypes.func.isRequired,

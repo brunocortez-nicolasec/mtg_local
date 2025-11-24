@@ -50,14 +50,11 @@ function GerenciarDataSources() {
   const [systemToDelete, setSystemToDelete] = useState(null);
 
   // Controle de Modais de Edição/Criação
-  // 'activeModal' armazena qual modal está aberto: "RH", "IDM", "SISTEMA" ou null
   const [activeModal, setActiveModal] = useState(null);
   const [editingDataSource, setEditingDataSource] = useState(null);
   
-  // ======================= INÍCIO DA ALTERAÇÃO =======================
   // Estado para o Modal de Seleção de Tipo (substitui o Menu)
   const [isSelectionDialogOpen, setIsSelectionDialogOpen] = useState(false);
-  // ======================== FIM DA ALTERAÇÃO =========================
 
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [dataSourceToView, setDataSourceToView] = useState(null);
@@ -91,7 +88,7 @@ function GerenciarDataSources() {
     }
   }, [token]);
 
-  // ======================= INÍCIO DA ALTERAÇÃO (Handlers) =======================
+  // Handlers
   
   // Abre o modal de seleção (Dialog)
   const handleOpenSelectionDialog = () => {
@@ -107,7 +104,6 @@ function GerenciarDataSources() {
   
   const handleEditClick = (dataSource) => {
     setEditingDataSource(dataSource);
-    // Abre o modal correspondente à origem do dado
     setActiveModal(dataSource.origem_datasource); 
   };
 
@@ -115,7 +111,6 @@ function GerenciarDataSources() {
     setActiveModal(null);
     setEditingDataSource(null);
   };
-  // ======================== FIM DA ALTERAÇÃO =========================
 
   const handleViewClick = (dataSource) => {
     setDataSourceToView(dataSource);
@@ -149,16 +144,17 @@ function GerenciarDataSources() {
 
       } else {
         response = await axios.post('/systems', formData, { headers });
-        
         const newDataSource = response.data;
         
         handleCloseModal();
         
-        // Redireciona para mapeamento se a criação foi bem sucedida
-        if (newDataSource.id) {
-          navigate(`/observabilidade/mapeamento-dados/${newDataSource.id}`);
+        // Redirecionamento com Delay
+        if (newDataSource && newDataSource.id) {
+          setTimeout(() => {
+              navigate(`/observabilidade/mapeamento-dados/${newDataSource.id}`);
+          }, 100);
         } else {
-          setNotification({ open: true, color: "error", title: "Erro", content: "Não foi possível obter o ID da nova fonte." });
+          setNotification({ open: true, color: "error", title: "Erro", content: "Não foi possível obter o ID da nova fonte para redirecionamento." });
           fetchSystems();
         }
       }
@@ -234,7 +230,44 @@ function GerenciarDataSources() {
       Header: "Tipo",
       accessor: "type_datasource",
       align: "center",
-      Cell: ({ value }) => <MDTypography variant="caption">{value || "N/A"}</MDTypography>
+      // --- Lógica para exibir o Tipo correto com Nome do Banco ---
+      Cell: ({ row: { original: dataSource } }) => {
+        let displayType = dataSource.type_datasource || "N/A";
+
+        // Helper para formatar o nome do banco (ex: postgres -> Postgres)
+        const formatDbName = (type) => type ? ` - ${type.charAt(0).toUpperCase() + type.slice(1)}` : '';
+
+        // 1. SISTEMA
+        if (dataSource.origem_datasource === "SISTEMA" && dataSource.systemConfig) {
+            const { tipo_fonte_contas, tipo_fonte_recursos, db_type } = dataSource.systemConfig;
+            
+            if (tipo_fonte_contas === 'DATABASE' || tipo_fonte_recursos === 'DATABASE') {
+                displayType = `DATABASE${formatDbName(db_type || 'postgres')}`;
+            } 
+            else if (tipo_fonte_contas === 'API' || tipo_fonte_recursos === 'API') {
+                displayType = "API";
+            } 
+            else {
+                displayType = "CSV";
+            }
+        } 
+        // 2. RH (CORREÇÃO APLICADA: Checa host ou url, e formata nome)
+        else if (dataSource.origem_datasource === "RH" && dataSource.hrConfig) {
+            const { db_host, db_url, db_type } = dataSource.hrConfig;
+            
+            if (db_host || db_url) {
+                displayType = `DATABASE${formatDbName(db_type || 'postgres')}`;
+            } else {
+                displayType = "CSV";
+            }
+        }
+        // 3. IDM
+        else if (dataSource.origem_datasource === "IDM") {
+             displayType = "API";
+        }
+
+        return <MDTypography variant="caption">{displayType}</MDTypography>;
+      }
     },
     {
       Header: "Mapeamento",
@@ -363,7 +396,7 @@ function GerenciarDataSources() {
         </Grid>
       </MDBox>
 
-      {/* ======================= INÍCIO DA ALTERAÇÃO (Modal de Seleção) ======================= */}
+      {/* Modal de Seleção */}
       <Dialog open={isSelectionDialogOpen} onClose={() => setIsSelectionDialogOpen(false)}>
           <DialogTitle>Selecione o Tipo de Fonte</DialogTitle>
           <DialogContent sx={{ p: 2, minWidth: '300px' }}>
@@ -388,7 +421,6 @@ function GerenciarDataSources() {
              </MDButton>
           </DialogActions>
       </Dialog>
-      {/* ======================== FIM DA ALTERAÇÃO ========================= */}
 
 
       {/* Modal de RH */}

@@ -5,7 +5,6 @@ import dotenv from "dotenv";
 import "./passport.js";
 import { meRoutes, authRoutes } from "./routes";
 import usersRoutes from "./services/users/index.js";
-import conjurRoutes from "./services/conjur/index.js";
 import rolesRoutes from "./services/roles/index.js";
 import groupsRoutes from "./services/groups/index.js";
 import platformsRoutes from "./services/platforms/index.js";
@@ -25,52 +24,66 @@ import systemsCatalogRoutes from "./services/systems-catalog/index.js";
 import resourcesRoutes from "./services/resources/index.js";
 import exportsRoutes from "./services/exports/index.js";
 
-import passport from "passport"; // Necessário para proteger a nova rota
-// ======================= INÍCIO DA ALTERAÇÃO =======================
+import passport from "passport"; 
 import { testCsvConnection } from "./services/datasources/testCsv.js";
-import { testDbConnection } from "./services/datasources/testDb.js"; // <-- Importado
-// ======================== FIM DA ALTERAÇÃO =========================
+import { testDbConnection } from "./services/datasources/testDb.js"; 
 
 import path from "path";
 import * as fs from "fs";
 
+// 1. Carrega as variáveis do arquivo .env
 dotenv.config();
 
 const PORT = process.env.PORT || 8080;
 const app = express();
 
+// 2. Lê estritamente do ambiente. Sem fallbacks hardcoded.
+const CLIENT_URL = process.env.APP_URL_CLIENT;
+const API_URL = process.env.API_PUBLIC_URL;
+
+// Verificação de segurança na inicialização
+if (!CLIENT_URL || !API_URL) {
+  console.error("❌ ERRO CRÍTICO: Variáveis de ambiente APP_URL_CLIENT ou API_PUBLIC_URL não definidas.");
+  console.error("Verifique o arquivo .env no diretório node-api.");
+  // Em produção, você poderia dar um process.exit(1) aqui.
+} else {
+  console.log("✅ Configuração de Ambiente Carregada:");
+  console.log(`   Client: ${CLIENT_URL}`);
+  console.log(`   API: ${API_URL}`);
+}
+
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
-      process.env.APP_URL_CLIENT,
-      "http://localhost:8080",
-      "http://localhost:3000",
-      "http://localhost:3080/",
-      "http://localhost:8080/",
+      CLIENT_URL,
+      API_URL,
+      `${CLIENT_URL}/`, // Garante que a barra no final também seja aceita
+      `${API_URL}/`
     ];
+
+    // Permite requisições sem 'origin' (como Postman) ou se a origem estiver na lista permitida pelo .env
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.error(`🚫 Bloqueado pelo CORS. Origem: ${origin}`);
       callback(new Error("Not allowed by CORS"));
     }
   },
   credentials: true,
-  methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
-  allowedHeaders: "Content-Type, Authorization",
+  methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type, Authorization, Accept",
 };
 
 app.use(cors(corsOptions));
 
-// bodyParser.json() é geralmente substituído por express.json()
-// const jsonParser = bodyParser.json(); // <<< Pode ser removido se não usado em outro lugar
-app.use(express.json()); // <<< Garante que o body parser JSON está ativo
+app.use(express.json());
 
 app.get("/", function (req, res) {
   const __dirname = fs.realpathSync(".");
   res.sendFile(path.join(__dirname, "/src/landing/index.html"));
 });
 
-// Suas rotas existentes
+// Rotas
 app.use("/", authRoutes);
 app.use("/me", meRoutes);
 app.use("/users", usersRoutes);

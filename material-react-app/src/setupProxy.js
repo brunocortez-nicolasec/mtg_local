@@ -30,7 +30,7 @@ const apiRoutes = [
 
 // Configuração do proxy com a função onProxyReq
 const proxyConfig = {
-  target: "http://localhost:8080",
+  target: process.env.REACT_APP_API_URL,
   changeOrigin: true,
   onProxyReq: (proxyReq, req, res) => {
     if (req.headers.authorization) {

@@ -179,7 +179,7 @@ export default function App() {
           {/* --- FIM DA ADIÇÃO --- */}
 
           {getRoutes(routes)}
-          <Route path="*" element={<Navigate to="/mind-the-gap" />} />
+          <Route path="*" element={<Navigate to="/dashboard" />} />
         </Routes>
       </DashboardProvider>
     </ThemeProvider>

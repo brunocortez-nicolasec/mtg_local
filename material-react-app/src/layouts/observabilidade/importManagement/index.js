@@ -1,6 +1,6 @@
 // material-react-app/src/layouts/observabilidade/importManagement/index.js
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { useMaterialUIController } from "context";
 
@@ -28,7 +28,6 @@ import PropTypes from 'prop-types';
 // Material Dashboard 2 React example components
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import CircularProgress from "@mui/material/CircularProgress";
 
 // --- NOVOS COMPONENTES FILHOS ---
 import HistoryTable from "./components/HistoryTable";
@@ -50,6 +49,7 @@ const ColumnDetail = ({ name, description, example }) => (
   </MDBox>
 );
 ColumnDetail.propTypes = { name: PropTypes.string.isRequired, description: PropTypes.string.isRequired, example: PropTypes.string.isRequired };
+
 function DetailItem({ icon, label, value, children, darkMode }) {
   const valueColor = darkMode ? "white" : "text.secondary";
   return (
@@ -63,6 +63,7 @@ function DetailItem({ icon, label, value, children, darkMode }) {
   );
 }
 DetailItem.propTypes = { icon: PropTypes.string.isRequired, label: PropTypes.string.isRequired, value: PropTypes.any, children: PropTypes.node, darkMode: PropTypes.bool };
+DetailItem.defaultProps = { darkMode: false, value: null, children: null };
 // --- Fim dos Componentes Auxiliares ---
 
 
@@ -168,10 +169,38 @@ function ImportManagement() {
       }
     };
 
-    const handleProcessDirectory = async (dataSourceId, processingTarget, callback) => {
+    // ======================= INÍCIO DA ALTERAÇÃO (Função de Disparo Unificada) =======================
+    // Esta função decide qual rota chamar com base na configuração da fonte
+    const handleTriggerProcessing = async (dataSourceId, processingTarget, callback) => {
       setIsProcessing(true);
+      
+      // 1. Encontra a fonte para saber o tipo
+      const source = allDataSources.find(ds => ds.id === dataSourceId);
+      if (!source) {
+          handleProcessError({ response: { data: { message: "Fonte não encontrada no frontend." } } }, callback);
+          setIsProcessing(false);
+          return;
+      }
+
+      // 2. Determina o tipo (CSV ou DATABASE)
+      let type = 'CSV'; // Default
+      if (source.origem_datasource === 'RH') {
+           // Se tiver config de DB, é DB
+           if (source.hrConfig?.db_host || source.hrConfig?.db_url) type = 'DATABASE';
+      } else if (source.origem_datasource === 'SISTEMA' && source.systemConfig) {
+           // Se SISTEMA, olha a config específica
+           type = processingTarget === 'CONTAS' 
+              ? source.systemConfig.tipo_fonte_contas 
+              : source.systemConfig.tipo_fonte_recursos;
+      }
+
+      // 3. Escolhe a URL correta (Segregada)
+      const url = (type === 'DATABASE') 
+         ? '/imports/sync-db' 
+         : '/imports/process-directory';
+
       try {
-        const response = await axios.post('/imports/process-directory', { dataSourceId, processingTarget }, { 
+        const response = await axios.post(url, { dataSourceId, processingTarget }, { 
           headers: { 'Authorization': `Bearer ${token}` } 
         });
         
@@ -182,6 +211,7 @@ function ImportManagement() {
         setIsProcessing(false);
       }
     };
+    // ======================== FIM DA ALTERAÇÃO =========================
     
     // Funções helper para tratar a resposta
     const handleProcessSuccess = (importLog, callback) => {
@@ -201,7 +231,7 @@ function ImportManagement() {
           color: statusColor, 
           icon: statusColor === "success" ? "check" : "warning", 
           title: statusTitle, 
-          content: `Fonte: ${importLog.dataSource.name_datasource}. ${importLog.processedRows}/${importLog.totalRows} linhas processadas.` 
+          content: `Fonte: ${importLog.dataSource?.name_datasource || 'Fonte'}. ${importLog.processedRows}/${importLog.totalRows} registros processados.` 
       });
       
       if (callback) callback();
@@ -248,7 +278,8 @@ function ImportManagement() {
                     <Grid item xs={12}>
                         <ImportCard
                             onProcessUpload={handleProcessUpload}
-                            onProcessDirectory={handleProcessDirectory}
+                            // Passa a nova função inteligente
+                            onProcessDirectory={handleTriggerProcessing}
                             dataSourceOptions={allDataSources} 
                             history={history}
                             isLoading={isProcessing || loadingDataSources}
@@ -277,18 +308,18 @@ function ImportManagement() {
 
             <Dialog open={templateModalOpen} onClose={handleCloseTemplateModal} fullWidth maxWidth="md">
                 <DialogTitle sx={{ p: 2 }}>
-                  <MDTypography variant="h5">Processamento de CSV</MDTypography>
+                  <MDTypography variant="h5">Processamento de Dados</MDTypography>
                 </DialogTitle>
                 <DialogContent dividers sx={{ p: 3, borderTop: "none" }}>
                     <MDTypography variant="body2" color="text">
-                        O processamento de CSVs agora é feito com base no mapeamento de colunas definido 
+                        O processamento de dados é feito com base no mapeamento de colunas definido 
                         para cada Fonte de Dados.
                         <br/><br/>
-                        1. Vá para <MDTypography component="strong" variant="body2">Observabilidade &gt; Fonte de Dados</MDTypography> para cadastrar sua fonte.
+                        1. Vá para <MDTypography component="strong" variant="body2">Observabilidade &gt; Fonte de Dados</MDTypography> para cadastrar sua fonte (CSV ou Banco).
                         <br/>
                         2. Vá para <MDTypography component="strong" variant="body2">Observabilidade &gt; Mapeamento de Dados</MDTypography> para configurar o "de-para" das colunas.
                         <br/>
-                        3. Volte para esta página, selecione a fonte configurada e escolha o método de processamento.
+                        3. Volte para esta página, selecione a fonte configurada e clique em "Processar" ou "Sincronizar Agora".
                     </MDTypography>
                 </DialogContent>
                  <DialogActions sx={{ p: 2, justifyContent: 'flex-end' }}>
@@ -330,7 +361,7 @@ function ImportManagement() {
                                     <Grid item xs={12} md={6}>
                                         <DetailItem icon="badge" label="Usuário" value={selectedLogDetails.user?.name} darkMode={darkMode} />
                                         <DetailItem icon="storage" label="Fonte de Dados" value={selectedLogDetails.dataSource?.name_datasource} darkMode={darkMode} />
-                                        <DetailItem icon="description" label="Arquivo/Caminho" value={selectedLogDetails.fileName} darkMode={darkMode} />
+                                        <DetailItem icon="description" label="Arquivo/Tabela" value={selectedLogDetails.fileName} darkMode={darkMode} />
                                         <DetailItem icon="numbers" label="Registros" value={`${selectedLogDetails.processedRows} / ${selectedLogDetails.totalRows}`} darkMode={darkMode} />
                                     </Grid>
                                     <Grid item xs={12} md={6}>
@@ -372,13 +403,5 @@ function ImportManagement() {
         </DashboardLayout>
     );
 }
-
-// PropTypes
-DetailItem.defaultProps = {
-  darkMode: false,
-  value: null,
-  children: null,
-};
-
 
 export default ImportManagement;
