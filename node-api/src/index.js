@@ -40,6 +40,7 @@ const app = express();
 // 2. Lê estritamente do ambiente. Sem fallbacks hardcoded.
 const CLIENT_URL = process.env.APP_URL_CLIENT;
 const API_URL = process.env.API_PUBLIC_URL;
+const HOSTNAME_URL = process.env.API_HOSTNAME_URL;
 
 // Verificação de segurança na inicialização
 if (!CLIENT_URL || !API_URL) {
@@ -57,7 +58,9 @@ const corsOptions = {
     const allowedOrigins = [
       CLIENT_URL,
       API_URL,
+      HOSTNAME_URL,
       `${CLIENT_URL}/`, // Garante que a barra no final também seja aceita
+      `${HOSTNAME_URL}/`, // Garante que a barra no final também seja aceita
       `${API_URL}/`
     ];
 

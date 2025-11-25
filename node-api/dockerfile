@@ -9,7 +9,9 @@ COPY package*.json ./
 RUN npm install
 
 COPY prisma ./prisma/
-# Este comando agora vai ler o binaryTargets e gerar o motor correto
+
+COPY certs/nicolasec-WIN.cer /usr/local/share/ca-certificates/nicolasec-WIN.crt
+
 RUN npx prisma generate
 
 COPY . .
