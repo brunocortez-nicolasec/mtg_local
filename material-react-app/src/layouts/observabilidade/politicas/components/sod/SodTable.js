@@ -118,8 +118,8 @@ function SodTable({ loading, rules, resources, systems, attributes, onEdit, onDe
       Cell: ({ row: { original } }) => (
         <MDBox display="flex" justifyContent="center">
           <Tooltip title="Editar">
-            <IconButton onClick={() => onEdit(original)} size="small">
-              <Icon>edit</Icon>
+            <IconButton onClick={() => onEdit(original)} size="small" >
+              <Icon color="info">edit</Icon>
             </IconButton>
           </Tooltip>
           <Tooltip title="Deletar">

@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import Collapse from "@mui/material/Collapse";
+import Grid from "@mui/material/Grid";
+import Card from "@mui/material/Card";
+import Chip from "@mui/material/Chip"; 
+
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDInput from "components/MDInput";
@@ -12,95 +16,130 @@ import AuthService from "../../services/auth-service";
 import axios from "axios";
 import { useMaterialUIController, setAuth } from "context";
 
+// Componente auxiliar
+const ProfileInfoItem = ({ label, value, children }) => (
+  <MDBox display="flex" flexDirection="column" mb={2}>
+    <MDTypography variant="caption" fontWeight="bold" color="text" textTransform="uppercase">
+      {label}
+    </MDTypography>
+    {children ? children : (
+        <MDTypography variant="button" fontWeight="medium" color="dark">
+           {value || "-"}
+        </MDTypography>
+    )}
+  </MDBox>
+);
+
 const UserProfile = () => {
   const [controller, dispatch] = useMaterialUIController();
   const { user: authUser, token } = controller;
   
   const fileInputRef = useRef(null);
   const [notification, setNotification] = useState({ show: false, message: "", color: "info" });
-  const [user, setUser] = useState({
-    name: "", email: "", role: "", profile_image: null, newPassword: "", confirmPassword: "",
+  
+  const [formState, setFormState] = useState({
+    newPassword: "", 
+    confirmPassword: "",
+    profile_image: null
   });
 
-  // --- CORREÇÃO: URL CORRETA PARA O AXIOS CRU ---
+  const [userData, setUserData] = useState({
+    name: "", email: "", role: "", package: "", groups: [], createdAt: ""
+  });
+
   const API_URL = process.env.REACT_APP_API_URL;
 
   useEffect(() => {
     if (authUser?.data?.attributes) {
-      const { name, email, role, profile_image } = authUser.data.attributes;
-      setUser((prevUser) => ({
-        ...prevUser,
-        name: name || "",
-        email: email || "",
-        role: role || "",
-        profile_image: profile_image || null,
-      }));
+      const attr = authUser.data.attributes;
+      
+      setUserData({
+        name: attr.name,
+        email: attr.email,
+        role: attr.role,
+        package: attr.package,
+        groups: attr.groups || [],
+        createdAt: attr.createdAt ? new Date(attr.createdAt).toLocaleDateString('pt-BR') : ""
+      });
+
+      // Carrega a imagem inicial
+      setFormState(prev => ({ ...prev, profile_image: attr.profile_image }));
     }
   }, [authUser]);
 
   useEffect(() => {
     if (notification.show) {
-      const timer = setTimeout(() => {
-        setNotification((prevState) => ({ ...prevState, show: false }));
-      }, 5000);
+      const timer = setTimeout(() => setNotification(prev => ({ ...prev, show: false })), 5000);
       return () => clearTimeout(timer);
     }
   }, [notification]);
 
-  const changeHandler = (e) => setUser({ ...user, [e.target.name]: e.target.value });
+  const changeHandler = (e) => setFormState({ ...formState, [e.target.name]: e.target.value });
+
+  // --- LÓGICA DE VALIDAÇÃO E ESTADO DO BOTÃO ---
+  
+  // 1. Verifica se a imagem mudou em relação ao que veio do banco
+  const originalImage = authUser?.data?.attributes?.profile_image;
+  const hasImageChanged = formState.profile_image !== originalImage;
+
+  // 2. Validações de Senha
+  const passwordChanged = formState.newPassword.length > 0;
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*(),.?":{}|<>])(?=.{8,})/;
+  const isComplex = passwordRegex.test(formState.newPassword);
+  const doPasswordsMatch = formState.newPassword === formState.confirmPassword;
+  
+  const complexityError = passwordChanged && !isComplex;
+  const matchError = passwordChanged && !doPasswordsMatch;
+
+  // A senha é válida se: não foi mexida OU (foi mexida E está correta)
+  const isPasswordValid = !passwordChanged || (isComplex && doPasswordsMatch);
+
+  // Pode salvar se: (Mudou Imagem OU Mudou Senha) E (Senha está válida)
+  const canSave = (hasImageChanged || passwordChanged) && isPasswordValid;
+  // ---------------------------------------------
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => setUser({ ...user, profile_image: reader.result });
+      reader.onloadend = () => setFormState(prev => ({ ...prev, profile_image: reader.result }));
       reader.readAsDataURL(file);
     }
   };
 
   const submitHandler = async (e) => {
     e.preventDefault();
+    if (!canSave) return; 
 
-    const attributes = { 
-      name: user.name, 
-      email: user.email, 
-      profile_image: user.profile_image 
-    };
+    const attributes = {};
 
-    if (user.newPassword) {
-      if (user.newPassword.length < 8 || user.newPassword !== user.confirmPassword) {
-        setNotification({ show: true, message: "As senhas devem ter no mínimo 8 caracteres e ser iguais.", color: "error" });
-        return;
-      }
-      attributes.newPassword = user.newPassword;
-      attributes.confirmPassword = user.confirmPassword;
+    // Só envia imagem se mudou
+    if (hasImageChanged) {
+        attributes.profile_image = formState.profile_image;
     }
 
-    const payload = {
-      data: {
-        attributes: attributes,
-      },
-    };
+    // Só envia senha se mudou
+    if (passwordChanged) {
+        attributes.newPassword = formState.newPassword;
+        attributes.confirmPassword = formState.confirmPassword;
+    }
 
     try {
-      // Supõe-se que AuthService usa o http.service configurado corretamente
-      await AuthService.updateProfile(payload); 
+      await AuthService.updateProfile({ data: { attributes } }); 
       
-      // --- CORREÇÃO AQUI: Usar API_URL ---
-      // Antes estava "/me", o que falharia no Portainer retornando HTML
       const updatedUserResponse = await axios.get(`${API_URL}/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       setAuth(dispatch, { token, user: updatedUserResponse.data });
-
-      setNotification({ show: true, message: "Perfil atualizado com sucesso!", color: "success" });
-      setUser((prev) => ({ ...prev, newPassword: "", confirmPassword: "" }));
+      setNotification({ show: true, message: "Alterações salvas com sucesso!", color: "success" });
+      
+      // Limpa campos de senha após salvar
+      setFormState(prev => ({ ...prev, newPassword: "", confirmPassword: "" }));
 
     } catch (error) {
       console.error("Erro ao atualizar perfil:", error);
-      const errorMessage = error.response?.data?.message || "Erro ao atualizar o perfil.";
-      setNotification({ show: true, message: errorMessage, color: "error" });
+      setNotification({ show: true, message: error.response?.data?.message || "Erro ao atualizar.", color: "error" });
     }
   };
 
@@ -111,9 +150,9 @@ const UserProfile = () => {
       <DashboardNavbar />
       <MDBox mb={2} />
       <Header
-        name={user.name || "Carregando..."} 
-        role={user.role}
-        profileImage={user.profile_image}
+        name={userData.name || "Carregando..."} 
+        role={userData.role}
+        profileImage={formState.profile_image} 
         onAvatarClick={handleAvatarClick}
       >
         <input
@@ -123,36 +162,124 @@ const UserProfile = () => {
           accept="image/png, image/jpeg"
           style={{ display: "none" }}
         />
-        <Collapse in={notification.show}>
-          <MDAlert color={notification.color} mt="20px">
-            <MDTypography variant="body2" color="white">{notification.message}</MDTypography>
-          </MDAlert>
-        </Collapse>
-        <MDBox component="form" role="form" onSubmit={submitHandler}>
-          <MDBox display="flex" flexDirection="row" mt={5} mb={3}>
-            <MDBox flex="1" mr={1}>
-              <MDTypography variant="body2" color="text" ml={1} fontWeight="regular">Nome</MDTypography>
-              <MDInput type="name" fullWidth name="name" value={user.name} onChange={changeHandler} />
-            </MDBox>
-            <MDBox flex="1" ml={1}>
-              <MDTypography variant="body2" color="text" ml={1} fontWeight="regular">Email</MDTypography>
-              <MDInput type="email" fullWidth name="email" value={user.email} onChange={changeHandler} />
-            </MDBox>
-          </MDBox>
-          <MDBox display="flex" flexDirection="row" mb={3}>
-            <MDBox flex="1" mr={1}>
-              <MDTypography variant="body2" color="text" ml={1} fontWeight="regular">Nova Senha</MDTypography>
-              <MDInput type="password" fullWidth name="newPassword" value={user.newPassword} onChange={changeHandler} autoComplete="new-password" />
-            </MDBox>
-            <MDBox flex="1" ml={1}>
-              <MDTypography variant="body2" color="text" ml={1} fontWeight="regular">Confirmação de Senha</MDTypography>
-              <MDInput type="password" fullWidth name="confirmPassword" value={user.confirmPassword} onChange={changeHandler} autoComplete="new-password" />
-            </MDBox>
-          </MDBox>
-          <MDBox mt={4} display="flex" justifyContent="end">
-            <MDButton variant="gradient" color="info" type="submit">Salvar Alterações</MDButton>
-          </MDBox>
+
+        <MDBox mt={5} mb={3}>
+            <Grid container spacing={1}>
+                {/* Coluna da Esquerda: Dados Cadastrais */}
+                <Grid item xs={12} md={6} xl={4}>
+                     <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
+                        <MDBox p={2}>
+                            <MDTypography variant="h6" fontWeight="medium" textTransform="capitalize">
+                                Informações da Conta
+                            </MDTypography>
+                        </MDBox>
+                        <MDBox pt={0} pb={2} px={2}>
+                            <ProfileInfoItem label="Nome Completo" value={userData.name} />
+                            <ProfileInfoItem label="Email" value={userData.email} />
+                            <Grid container spacing={2}>
+                                <Grid item xs={6}>
+                                    <ProfileInfoItem label="Função / Perfil" value={userData.role} />
+                                </Grid>
+                                <Grid item xs={6}>
+                                    <ProfileInfoItem label="Data de Criação" value={userData.createdAt} />
+                                </Grid>
+                            </Grid>
+                        </MDBox>
+                    </Card>
+                </Grid>
+
+                {/* Coluna do Meio: Acessos e Grupos */}
+                <Grid item xs={12} md={6} xl={4}>
+                     <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
+                        <MDBox p={2}>
+                            <MDTypography variant="h6" fontWeight="medium" textTransform="capitalize">
+                                Acessos e Permissões
+                            </MDTypography>
+                        </MDBox>
+                        <MDBox pt={0} pb={2} px={2}>
+                             <ProfileInfoItem label="Pacote Atribuído" value={userData.package} />
+                             
+                             <ProfileInfoItem label="Grupos">
+                                 {userData.groups.length > 0 ? (
+                                     <MDBox display="flex" flexWrap="wrap" gap={1}>
+                                         {userData.groups.map((group, idx) => (
+                                             <Chip 
+                                                key={idx} 
+                                                label={group} 
+                                                size="small" 
+                                                color="info" 
+                                                variant="outlined"
+                                             />
+                                         ))}
+                                     </MDBox>
+                                 ) : (
+                                     <MDTypography variant="caption" color="text" fontStyle="italic">Nenhum grupo atribuído</MDTypography>
+                                 )}
+                             </ProfileInfoItem>
+                        </MDBox>
+                    </Card>
+                </Grid>
+
+                {/* Coluna da Direita: Alterar Senha e Salvar */}
+                <Grid item xs={12} xl={4}>
+                     <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
+                        <MDBox p={2}>
+                            <MDTypography variant="h6" fontWeight="medium" textTransform="capitalize">
+                                Segurança & Perfil
+                            </MDTypography>
+                        </MDBox>
+                        <MDBox pt={0} pb={2} px={2} component="form" role="form" onSubmit={submitHandler}>
+                             <MDTypography variant="caption" color="text" mb={2} display="block">
+                                 Para alterar sua senha, preencha os campos abaixo. A nova senha deve conter letras maiúsculas, minúsculas, números e caracteres especiais.
+                             </MDTypography>
+
+                             <MDBox mb={2}>
+                                <MDInput 
+                                    type="password" 
+                                    label="Nova Senha" 
+                                    name="newPassword" 
+                                    fullWidth
+                                    value={formState.newPassword} 
+                                    onChange={changeHandler} 
+                                    error={complexityError}
+                                />
+                             </MDBox>
+                             
+                             <MDBox mb={2}>
+                                <MDInput 
+                                    type="password" 
+                                    label="Confirmar Senha" 
+                                    name="confirmPassword" 
+                                    fullWidth
+                                    value={formState.confirmPassword} 
+                                    onChange={changeHandler} 
+                                    error={matchError}
+                                    disabled={!formState.newPassword}
+                                />
+                             </MDBox>
+
+                             <Collapse in={notification.show}>
+                                <MDAlert color={notification.color} mb={2}>
+                                    <MDTypography variant="caption" color="white">{notification.message}</MDTypography>
+                                </MDAlert>
+                            </Collapse>
+
+                             <MDBox mt={2} display="flex" justifyContent="flex-end">
+                                <MDButton 
+                                    variant="gradient" 
+                                    color="info" 
+                                    type="submit"
+                                    disabled={!canSave} // Habilita se mudar foto OU senha válida
+                                >
+                                    Salvar Alterações
+                                </MDButton>
+                             </MDBox>
+                        </MDBox>
+                    </Card>
+                </Grid>
+            </Grid>
         </MDBox>
+
       </Header>
     </DashboardLayout>
   );

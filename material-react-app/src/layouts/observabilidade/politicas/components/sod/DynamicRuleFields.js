@@ -38,7 +38,6 @@ function DynamicRuleFields({
           onChange={(event, newValue) => onChange(valueField, newValue)}
           isOptionEqualToValue={(option, value) => option.id === value?.id}
           disabled={isDisabled} 
-          ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
           renderInput={(params) => <MDInput {...params} label="Atributo *" required variant="outlined" />}
         />
       </Grid>
@@ -51,7 +50,6 @@ function DynamicRuleFields({
           isOptionEqualToValue={(option, value) => option.id === value?.id}
           disableClearable
           disabled={isDisabled} 
-          ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
           renderInput={(params) => <MDInput {...params} label="Operador *" required variant="outlined" />}
         />
       </Grid>
@@ -85,7 +83,6 @@ function DynamicRuleFields({
         onChange={(event, newValue) => onChange(valueField, newValue)}
         isOptionEqualToValue={(option, value) => option.id === value?.id}
         disabled={isDisabled} 
-        ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
         renderInput={(params) => <MDInput {...params} label={label} required variant="outlined" />}
       />
     </Grid>
@@ -101,7 +98,6 @@ function DynamicRuleFields({
         onChange={(event, newValue) => onChange(valueField, newValue)}
         isOptionEqualToValue={(option, value) => option.id === value?.id}
         disabled={isDisabled} 
-        ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
         renderInput={(params) => <MDInput {...params} label={label} required variant="outlined" />}
       />
     </Grid>

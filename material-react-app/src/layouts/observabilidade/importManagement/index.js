@@ -183,6 +183,7 @@ function ImportManagement() {
       }
     };
 
+    // --- LÓGICA DE DISPARO INTELIGENTE (ATUALIZADA PARA API) ---
     const handleTriggerProcessing = async (dataSourceId, processingTarget, callback) => {
       setIsProcessing(true);
       
@@ -194,11 +195,12 @@ function ImportManagement() {
           return;
       }
 
-      // 2. Determina o tipo (CSV ou DATABASE)
+      // 2. Determina o tipo (CSV, DATABASE ou API)
       let type = 'CSV'; // Default
+
       if (source.origem_datasource === 'RH') {
-           // Se tiver config de DB, é DB
-           if (source.hrConfig?.db_host || source.hrConfig?.db_url) type = 'DATABASE';
+           if (source.hrConfig?.api_url) type = 'API'; // Prioridade API
+           else if (source.hrConfig?.db_host || source.hrConfig?.db_url) type = 'DATABASE';
       } else if (source.origem_datasource === 'SISTEMA' && source.systemConfig) {
            // Se SISTEMA, olha a config específica
            type = processingTarget === 'CONTAS' 
@@ -207,9 +209,9 @@ function ImportManagement() {
       }
 
       // 3. Escolhe a URL correta (Segregada)
-      const url = (type === 'DATABASE') 
-          ? '/imports/sync-db' 
-          : '/imports/process-directory';
+      let url = '/imports/process-directory';
+      if (type === 'DATABASE') url = '/imports/sync-db';
+      if (type === 'API') url = '/imports/sync-api'; // Nova rota
 
       try {
         const response = await api.post(url, { dataSourceId, processingTarget }, { 
@@ -326,7 +328,7 @@ function ImportManagement() {
                         O processamento de dados é feito com base no mapeamento de colunas definido 
                         para cada Fonte de Dados.
                         <br/><br/>
-                        1. Vá para <MDTypography component="strong" variant="body2">Observabilidade &gt; Fonte de Dados</MDTypography> para cadastrar sua fonte (CSV ou Banco).
+                        1. Vá para <MDTypography component="strong" variant="body2">Observabilidade &gt; Fonte de Dados</MDTypography> para cadastrar sua fonte (CSV, Banco ou API).
                         <br/>
                         2. Vá para <MDTypography component="strong" variant="body2">Observabilidade &gt; Mapeamento de Dados</MDTypography> para configurar o "de-para" das colunas.
                         <br/>

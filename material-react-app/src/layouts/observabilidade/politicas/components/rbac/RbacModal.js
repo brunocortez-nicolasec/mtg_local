@@ -338,7 +338,6 @@ function RbacModal({ open, onClose, onRefresh, showSnackbar, token, ruleToEdit,
                 onChange={(event, newValue) => handleFormChange(event, "system", newValue)} 
                 isOptionEqualToValue={(option, value) => option.id === value?.id}
                 disabled={isEditing}
-                ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                 renderInput={(params) => <MDInput {...params} label="Sistema Alvo *" required variant="outlined" />}
               />
               {isEditing && (
@@ -354,7 +353,6 @@ function RbacModal({ open, onClose, onRefresh, showSnackbar, token, ruleToEdit,
                 onChange={(event, newValue) => handleFormChange(event, "conditionType", newValue)} 
                 isOptionEqualToValue={(option, value) => option?.id === value?.id}
                 disabled={!currentRbacRule.system}
-                ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                 renderInput={(params) => <MDInput {...params} label="Tipo de Condição *" required variant="outlined" />}
                 disableClearable
               />
@@ -383,7 +381,6 @@ function RbacModal({ open, onClose, onRefresh, showSnackbar, token, ruleToEdit,
                 onChange={(event, newValue) => handleFormChange(event, "grantedProfile", newValue)}
                 isOptionEqualToValue={(option, value) => option?.id === value?.id}
                 disabled={!currentRbacRule.system}
-                ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                 renderInput={(params) => <MDInput {...params} label="Recurso Concedido *" required variant="outlined" />} 
               />
             </Grid>

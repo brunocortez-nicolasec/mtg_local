@@ -6,22 +6,28 @@ import { PrismaClient } from '@prisma/client';
 import Papa from "papaparse";
 import fs from 'fs';
 import path from 'path';
-// Importação do driver PostgreSQL para conexão direta
 import pkg from 'pg';
+import oracledb from 'oracledb';
+import axios from 'axios';
+import { parseStringPromise } from 'xml2js';
+
 const { Client } = pkg;
+
+// Configuração Global do Oracle: Retornar resultados como Objetos, não Arrays
+oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 
 const prisma = new PrismaClient();
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ===========================================================================
-// 1. HELPERS DE LEITURA (ARQUIVO E BANCO) - INALTERADOS
+// 1. HELPERS DE LEITURA (ARQUIVO, BANCO E API)
 // ===========================================================================
 
-// Helper: Encontrar arquivo CSV único no diretório
 const findSingleCsvInDir = async (directoryPath) => {
   const basePath = process.cwd();
-  const absolutePath = path.resolve(basePath, directoryPath);
+  const cleanPath = directoryPath.replace(/["']/g, "").trim().replace(/^[\.\/]+/, "");
+  const absolutePath = path.join(basePath, cleanPath);
 
   let stats;
   try {
@@ -47,78 +53,208 @@ const findSingleCsvInDir = async (directoryPath) => {
   return path.join(absolutePath, csvFiles[0]);
 };
 
-// Helper: Buscar dados de um Banco de Dados externo
+// --- HELPER DE BANCO DE DADOS (HÍBRIDO: POSTGRES + ORACLE) ---
 const fetchDataFromDatabase = async (dbConfig, tableName) => {
     if (!dbConfig) throw new Error("Configuração de banco de dados ausente.");
     if (!tableName) throw new Error("Nome da tabela não especificado.");
 
-    let clientConfig = {};
+    // Detecta o tipo (se não tiver definido, assume postgres por legado)
+    const dbType = dbConfig.db_type ? dbConfig.db_type.toLowerCase() : 'postgres';
 
-    if (dbConfig.db_connection_type === 'URL') {
-        if (!dbConfig.db_url) throw new Error("URL de conexão ausente.");
-        clientConfig = { connectionString: dbConfig.db_url, connectionTimeoutMillis: 10000 };
-    } else {
-        if (!dbConfig.db_host || !dbConfig.db_user || !dbConfig.db_name) throw new Error("Dados de conexão incompletos.");
-        clientConfig = {
-            host: dbConfig.db_host,
-            port: parseInt(dbConfig.db_port || 5432, 10),
-            user: dbConfig.db_user,
-            password: dbConfig.db_password,
-            database: dbConfig.db_name,
-            connectionTimeoutMillis: 10000
-        };
+    // =========================================================
+    // LÓGICA ORACLE
+    // =========================================================
+    if (dbType === 'oracle') {
+        let connection;
+        try {
+            let connectString;
+            
+            // 1. Monta a string de conexão (Easy Connect)
+            if (dbConfig.db_connection_type === 'URL') {
+                if (!dbConfig.db_url) throw new Error("URL de conexão Oracle ausente.");
+                connectString = dbConfig.db_url;
+            } else {
+                if (!dbConfig.db_host || !dbConfig.db_name) throw new Error("Host ou Service Name Oracle ausentes.");
+                const port = dbConfig.db_port || 1521;
+                connectString = `${dbConfig.db_host}:${port}/${dbConfig.db_name}`;
+            }
+
+            // 2. Conecta
+            connection = await oracledb.getConnection({
+                user: dbConfig.db_user,
+                password: dbConfig.db_password,
+                connectString: connectString
+            });
+
+            // 3. Monta a Query 
+            let fullTableName = tableName;
+            if (dbConfig.db_schema && dbConfig.db_schema.trim() !== '' && dbConfig.db_schema !== 'public') {
+                fullTableName = `${dbConfig.db_schema}.${tableName}`;
+            }
+
+            const query = `SELECT * FROM ${fullTableName}`;
+            
+            // Executa
+            const result = await connection.execute(query);
+            await connection.close();
+
+            // Retorna as linhas
+            return result.rows;
+
+        } catch (error) {
+            if (connection) {
+                try { await connection.close(); } catch(e) {}
+            }
+            throw new Error(`Erro Oracle: ${error.message}`);
+        }
     }
 
-    const client = new Client(clientConfig);
+    // =========================================================
+    // LÓGICA POSTGRESQL (Padrão)
+    // =========================================================
+    else {
+        let clientConfig = {};
+
+        if (dbConfig.db_connection_type === 'URL') {
+            if (!dbConfig.db_url) throw new Error("URL de conexão ausente.");
+            clientConfig = { connectionString: dbConfig.db_url, connectionTimeoutMillis: 10000 };
+        } else {
+            if (!dbConfig.db_host || !dbConfig.db_user || !dbConfig.db_name) throw new Error("Dados de conexão incompletos.");
+            clientConfig = {
+                host: dbConfig.db_host,
+                port: parseInt(dbConfig.db_port || 5432, 10),
+                user: dbConfig.db_user,
+                password: dbConfig.db_password,
+                database: dbConfig.db_name,
+                connectionTimeoutMillis: 10000
+            };
+        }
+
+        const client = new Client(clientConfig);
+        try {
+            await client.connect();
+            
+            const schema = dbConfig.db_schema || 'public';
+            const query = `SELECT * FROM "${schema}"."${tableName}"`;
+            
+            const res = await client.query(query);
+            await client.end();
+            
+            return res.rows; 
+        } catch (error) {
+            try { await client.end(); } catch(e) {}
+            throw new Error(`Erro Postgres: ${error.message}`);
+        }
+    }
+};
+
+// --- HELPER DE API (REST / SOAP) ---
+const fetchDataFromApi = async (config) => {
+    const { api_url, api_method, api_headers, api_body, api_response_path } = config;
+
+    if (!api_url) throw new Error("URL da API não configurada.");
+
+    // Prepara Headers (vem do banco como JSON Object)
+    const headers = api_headers || {};
+    
+    const reqConfig = {
+        method: api_method || 'GET',
+        url: api_url,
+        headers: headers,
+        timeout: 30000 // 30s timeout para sync
+    };
+
+    if (api_body) reqConfig.data = api_body;
+
     try {
-        await client.connect();
-        
-        const schema = dbConfig.db_schema || 'public';
-        const query = `SELECT * FROM "${schema}"."${tableName}"`;
-        
-        const res = await client.query(query);
-        await client.end();
-        
-        return res.rows; // Retorna array de objetos
+        const response = await axios(reqConfig);
+        let finalData = response.data;
+
+        // Conversão XML/SOAP se necessário
+        const contentType = response.headers['content-type'] || '';
+        const isXml = contentType.includes('xml') || (typeof response.data === 'string' && response.data.trim().startsWith('<'));
+
+        if (isXml) {
+            try {
+                finalData = await parseStringPromise(response.data, { explicitArray: false, ignoreAttrs: true });
+            } catch (e) {
+                throw new Error("Falha ao converter resposta XML/SOAP.");
+            }
+        }
+
+        // Navegação pelo Response Path (ex: data.users)
+        if (api_response_path) {
+            const pathParts = api_response_path.split('.');
+            let current = finalData;
+            for (const part of pathParts) {
+                if (current && current[part] !== undefined) {
+                    current = current[part];
+                } else {
+                    current = null;
+                    break;
+                }
+            }
+            finalData = current;
+        }
+
+        // Normalização para Array
+        let dataArray = [];
+        if (Array.isArray(finalData)) {
+            dataArray = finalData;
+        } else if (typeof finalData === 'object' && finalData !== null) {
+            // Tenta achar array dentro do objeto automaticamente se não tiver path
+            const arrayKey = Object.keys(finalData).find(key => Array.isArray(finalData[key]));
+            if (arrayKey) {
+                dataArray = finalData[arrayKey];
+            } else {
+                // Se for objeto único, transforma em array de 1 item
+                dataArray = [finalData];
+            }
+        } else {
+            throw new Error("A resposta da API não contém uma lista de dados válida.");
+        }
+
+        return dataArray;
+
     } catch (error) {
-        try { await client.end(); } catch(e) {}
-        throw new Error(`Erro ao buscar dados do banco: ${error.message}`);
+        const msg = error.response ? `Status ${error.response.status}: ${JSON.stringify(error.response.data)}` : error.message;
+        throw new Error(`Erro na API: ${msg}`);
     }
 };
 
 // ===========================================================================
-// 2. LÓGICAS DE PROCESSAMENTO (CORE) - SIMPLIFICADAS
+// 2. LÓGICAS DE PROCESSAMENTO (CORE)
 // ===========================================================================
 
-/**
- * Processa e salva dados da FONTE AUTORITATIVA (RH)
- */
 const processAndSaveData_RH = async (db, dataSourceId, rows, mapeamento) => {
   let processedCount = 0;
   const warningsOrErrors = [];
 
-  // Limpa dados antigos (OPERAÇÃO NÃO-ATÔMICA)
   await db.identitiesHR.deleteMany({ where: { dataSourceId: dataSourceId } });
 
   for (const [index, csvRow] of rows.entries()) {
     const linhaNum = index + 2; 
     const dataToSave = {};
 
-    try { // TRY-CATCH POR LINHA
-        // Mapeamento
+    try { 
         for (const [appColumn, csvColumn] of Object.entries(mapeamento)) {
             if (appColumn === "id" || appColumn === "dataSourceId") continue;
-            if (csvColumn && csvRow[csvColumn] !== undefined) {
-                // --- CORREÇÃO: Tratar NULL/UNDEFINED/Whitespace ---
-                const rawValue = csvRow[csvColumn];
-                dataToSave[appColumn] = (rawValue !== null && rawValue !== undefined) 
-                                        ? String(rawValue).trim() 
-                                        : '';
-                // --- FIM CORREÇÃO ---
+            
+            if (csvColumn) {
+                let rawValue = csvRow[csvColumn];
+                // Fallback UpperCase (Oracle/API)
+                if (rawValue === undefined) {
+                     rawValue = csvRow[csvColumn.toUpperCase()];
+                }
+
+                if (rawValue !== undefined) {
+                    dataToSave[appColumn] = (rawValue !== null) 
+                                            ? String(rawValue).trim() 
+                                            : '';
+                }
             }
         }
         
-        // Validação Obrigatória
         const requiredFields = ['identity_id_hr', 'email_hr', 'status_hr'];
         const missingFields = [];
         for (const field of requiredFields) {
@@ -127,10 +263,9 @@ const processAndSaveData_RH = async (db, dataSourceId, rows, mapeamento) => {
 
         if (missingFields.length > 0) {
             warningsOrErrors.push(`Linha ${linhaNum}: IGNORADA - Campos obrigatórios vazios: [${missingFields.join(', ')}].`);
-            continue; // Pula para a próxima linha
+            continue; 
         }
 
-        // Salvar (usando 'db' global)
         dataToSave.dataSourceId = dataSourceId; 
         await db.identitiesHR.create({ data: dataToSave });
         processedCount++;
@@ -142,14 +277,10 @@ const processAndSaveData_RH = async (db, dataSourceId, rows, mapeamento) => {
   return { processedCount, warningsOrErrors };
 };
 
-/**
- * Processa e salva dados de CONTAS (SISTEMA) e suas ATRIBUIÇÕES
- */
 const processAndSaveData_Contas = async (db, systemId, rows, mapeamento, resourceCache) => {
   let processedCount = 0;
   const warningsOrErrors = [];
   
-  // Limpa dados antigos (OPERAÇÃO NÃO-ATÔMICA)
   await db.assignment.deleteMany({ where: { account: { systemId: systemId } } });
   await db.accounts.deleteMany({ where: { systemId: systemId } });
 
@@ -164,18 +295,24 @@ const processAndSaveData_Contas = async (db, systemId, rows, mapeamento, resourc
     let resourceNamesString = null; 
     let identityId = null; 
 
-    try { // TRY-CATCH POR LINHA
-        // Mapeamento
+    try { 
         for (const [dbColumn, csvColumn] of Object.entries(mapeamento)) {
-            if (!dbColumn.startsWith("accounts_") || !csvColumn || csvRow[csvColumn] === undefined) continue;
+            if (!dbColumn.startsWith("accounts_") || !csvColumn) continue;
             
-            const rawValue = csvRow[csvColumn];
-            const cleanedValue = (rawValue !== null && rawValue !== undefined) ? String(rawValue).trim() : '';
+            let rawValue = csvRow[csvColumn];
+            // Fallback UpperCase (Oracle/API)
+            if (rawValue === undefined) {
+                rawValue = csvRow[csvColumn.toUpperCase()];
+            }
+
+            if (rawValue === undefined) continue;
+
+            const cleanedValue = (rawValue !== null) ? String(rawValue).trim() : '';
 
             let appColumn;
             switch (dbColumn) {
                 case "accounts_identity_id": 
-                    identityBusinessKey = cleanedValue; // Armazena valor limpo
+                    identityBusinessKey = cleanedValue; 
                     continue;
                 case "accounts_resource_name": 
                     resourceNamesString = cleanedValue;
@@ -190,33 +327,28 @@ const processAndSaveData_Contas = async (db, systemId, rows, mapeamento, resourc
             dataToSave[appColumn] = cleanedValue;
         }
         
-        // 🚨 CRÍTICO: Validação de campos obrigatórios (Apenas ID da Conta e Email)
         if (!dataToSave['id_in_system_account'] || !dataToSave['email_account']) {
-            warningsOrErrors.push(`Linha ${linhaNum}: IGNORADA - ID Único da Conta ou Email vazios. A conta não pode ser salva.`);
+            warningsOrErrors.push(`Linha ${linhaNum}: IGNORADA - ID Único da Conta ou Email vazios.`);
             continue; 
         }
         
-        // --- NOVO FLUXO SIMPLIFICADO PARA VINCULAR IDENTIDADE (FK) ---
         if (identityBusinessKey) {
             const identity = await db.identitiesHR.findUnique({ 
                 where: { identity_id_hr: identityBusinessKey }
             });
             
             if (identity) {
-                identityId = identity.id; // Vincula a FK
+                identityId = identity.id; 
             } else {
-                warningsOrErrors.push(`Linha ${linhaNum}: AVISO - ID RH '${identityBusinessKey}' não encontrado. A conta será ÓRFÃ.`);
-                identityId = null; // Define explicitamente como NULL para o Int? no schema
+                warningsOrErrors.push(`Linha ${linhaNum}: AVISO - ID RH '${identityBusinessKey}' não encontrado. Conta ÓRFÃ.`);
+                identityId = null; 
             }
         } else {
-            // Chave NÃO fornecida (CONTA ÓRFÃ INTENCIONAL)
-            warningsOrErrors.push(`Linha ${linhaNum}: AVISO - ID RH ausente. Conta marcada como potencial ÓRFÃ.`);
-            identityId = null; // Define explicitamente como NULL para o Int? no schema
+            warningsOrErrors.push(`Linha ${linhaNum}: AVISO - ID RH ausente. Conta ÓRFÃ.`);
+            identityId = null; 
         }
 
-        // Cria Conta
         dataToSave.systemId = systemId; 
-        // 🚨 CRÍTICO: Passamos NULL, que agora é permitido pelo schema Int?
         dataToSave.identityId = identityId; 
         
         const account = await db.accounts.upsert({ 
@@ -226,7 +358,6 @@ const processAndSaveData_Contas = async (db, systemId, rows, mapeamento, resourc
         });
         processedCount++;
         
-        // Cria Atribuições
         if (resourceNamesString) {
             const resourceNamesArray = String(resourceNamesString).split(';');
             const uniqueResourceNames = [...new Set(resourceNamesArray.map(r => r.replace(/"/g, '').trim()).filter(Boolean))];
@@ -243,21 +374,17 @@ const processAndSaveData_Contas = async (db, systemId, rows, mapeamento, resourc
             }
         }
     } catch (dbError) {
-        warningsOrErrors.push(`Linha ${linhaNum}: IGNORADA - Erro ao salvar/processar: ${dbError.message}`);
+        warningsOrErrors.push(`Linha ${linhaNum}: IGNORADA - Erro ao salvar: ${dbError.message}`);
     }
   } 
 
   return { processedCount, warningsOrErrors };
 };
 
-/**
- * Processa e salva dados de RECURSOS (SISTEMA)
- */
 const processAndSaveData_Recursos = async (db, systemId, rows, mapeamento) => {
   let processedCount = 0;
   const warningsOrErrors = [];
 
-  // Limpa dados antigos (OPERAÇÃO NÃO-ATÔMICA)
   await db.assignment.deleteMany({ where: { resource: { systemId: systemId } } });
   await db.resource.deleteMany({ where: { systemId: systemId } });
 
@@ -265,20 +392,27 @@ const processAndSaveData_Recursos = async (db, systemId, rows, mapeamento) => {
     const linhaNum = index + 2; 
     const dataToSave = {};
 
-    try { // TRY-CATCH POR LINHA
-        // Mapeamento
+    try { 
         for (const [dbColumn, csvColumn] of Object.entries(mapeamento)) {
-            if (dbColumn.startsWith("resources_") && csvColumn && csvRow[csvColumn] !== undefined) {
-                const rawValue = csvRow[csvColumn];
-                const cleanedValue = (rawValue !== null && rawValue !== undefined) ? String(rawValue).trim() : '';
-
-                let appColumn;
-                switch (dbColumn) {
-                    case "resources_name": appColumn = "name_resource"; break;
-                    case "resources_description": appColumn = "description_resource"; break;
-                    default: appColumn = dbColumn.replace("resources_", "");
+            if (dbColumn.startsWith("resources_") && csvColumn) {
+                
+                let rawValue = csvRow[csvColumn];
+                // Fallback UpperCase (Oracle/API)
+                if (rawValue === undefined) {
+                    rawValue = csvRow[csvColumn.toUpperCase()];
                 }
-                dataToSave[appColumn] = cleanedValue;
+
+                if (rawValue !== undefined) {
+                    const cleanedValue = (rawValue !== null) ? String(rawValue).trim() : '';
+
+                    let appColumn;
+                    switch (dbColumn) {
+                        case "resources_name": appColumn = "name_resource"; break;
+                        case "resources_description": appColumn = "description_resource"; break;
+                        default: appColumn = dbColumn.replace("resources_", "");
+                    }
+                    dataToSave[appColumn] = cleanedValue;
+                }
             }
         }
         
@@ -287,7 +421,6 @@ const processAndSaveData_Recursos = async (db, systemId, rows, mapeamento) => {
             continue;
         }
 
-        // Salvar (usando 'db' global)
         dataToSave.systemId = systemId; 
         await db.resource.create({ data: dataToSave });
         processedCount++;
@@ -300,12 +433,9 @@ const processAndSaveData_Recursos = async (db, systemId, rows, mapeamento) => {
 };
 
 // ===========================================================================
-// 3. CONTROLADORES (ROTAS) - LIMPEZA DE LÓGICA OBSOLETA
+// 3. CONTROLADORES (ROTAS)
 // ===========================================================================
 
-// --- A lógica de ensureOrphanIdentityExists foi removida, pois é obsoleta ---
-
-// GET HISTÓRICO
 const getImportHistory = async (req, res) => {
   try {
     const userIdInt = parseInt(req.user.id, 10);
@@ -323,7 +453,6 @@ const getImportHistory = async (req, res) => {
   }
 };
 
-// DELETAR LOG
 const deleteImportLog = async (req, res) => {
   const logId = parseInt(req.params.id, 10);
   const userIdInt = parseInt(req.user.id, 10);
@@ -335,7 +464,6 @@ const deleteImportLog = async (req, res) => {
     return res.status(500).json({ message: "Erro interno." });
   }
 };
-
 
 // ROTA A: PROCESSAMENTO DE DIRETÓRIO (CSV NO SERVIDOR)
 const handleDirectoryProcess = async (req, res) => {
@@ -351,7 +479,6 @@ const handleDirectoryProcess = async (req, res) => {
 
   if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
 
-  // Lógica de validação de rota (Mantida)
   let isTargetFile = dataSource.type_datasource === 'CSV'; 
   if (dataSource.origem_datasource === 'SISTEMA') {
       const config = dataSource.systemConfig;
@@ -360,7 +487,7 @@ const handleDirectoryProcess = async (req, res) => {
       else isTargetFile = false; 
   }
   if (!isTargetFile) {
-      return res.status(400).json({ message: "A fonte selecionada está configurada como Banco de Dados/API. Use a rota de sincronização correta." });
+      return res.status(400).json({ message: "A fonte selecionada está configurada como Banco de Dados/API." });
   }
 
   const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
@@ -369,11 +496,19 @@ const handleDirectoryProcess = async (req, res) => {
   });
 
   try {
-    // 1. Localiza e lê o arquivo CSV
     let diretorio = null;
-    if (dataSource.origem_datasource === 'RH') diretorio = dataSource.hrConfig?.diretorio_hr;
-    else if (dataSource.origem_datasource === 'SISTEMA') {
-        diretorio = processingTarget === 'CONTAS' ? dataSource.systemConfig?.diretorio_contas : dataSource.systemConfig?.diretorio_recursos;
+    let delimiter = ",";
+    let quote = '"';
+
+    if (dataSource.origem_datasource === 'RH') {
+        diretorio = dataSource.hrConfig?.diretorio_hr;
+        delimiter = dataSource.hrConfig?.csv_delimiter || ",";
+        quote = dataSource.hrConfig?.csv_quote || '"';
+    } else if (dataSource.origem_datasource === 'SISTEMA') {
+        const sysConfig = dataSource.systemConfig;
+        diretorio = processingTarget === 'CONTAS' ? sysConfig?.diretorio_contas : sysConfig?.diretorio_recursos;
+        delimiter = sysConfig?.csv_delimiter || ",";
+        quote = sysConfig?.csv_quote || '"';
     }
 
     if (!diretorio) throw new Error("Diretório não configurado.");
@@ -384,12 +519,18 @@ const handleDirectoryProcess = async (req, res) => {
     await prisma.importLog.update({ where: { id: importLog.id }, data: { fileName: fileName } });
 
     const fileContent = await fs.promises.readFile(fullCsvPath, "utf8");
-    const parsedCsv = Papa.parse(fileContent, { header: true, skipEmptyLines: true });
+    
+    const parsedCsv = Papa.parse(fileContent, { 
+        header: true, 
+        skipEmptyLines: true,
+        delimiter: delimiter,
+        quoteChar: quote
+    });
     const rows = parsedCsv.data;
 
-    if (!rows.length) throw new Error("O arquivo CSV está vazio.");
+    if (!rows.length) throw new Error("O arquivo CSV está vazio ou não pôde ser lido com o delimitador configurado.");
     
-    // Validação Dinâmica de Colunas (Mantida)
+    // Validação Dinâmica de Colunas (CSV)
     if (dataSource.origem_datasource === 'SISTEMA' && processingTarget === 'CONTAS' && rows.length > 0) {
         const requiredMappings = ['accounts_id_in_system', 'accounts_email', 'accounts_identity_id', 'accounts_resource_name'];
         const availableKeys = Object.keys(rows[0] || {});
@@ -404,13 +545,12 @@ const handleDirectoryProcess = async (req, res) => {
         }
 
         if (missingSourceCol) {
-            throw new Error(`COLUNA CRÍTICA AUSENTE: O campo obrigatório '${missingSourceCol.appField}' (mapeado para '${missingSourceCol.sourceCol}') não foi encontrado nos cabeçalhos do CSV. Verifique o mapeamento.`);
+            throw new Error(`COLUNA CRÍTICA AUSENTE: O campo obrigatório '${missingSourceCol.appField}' (mapeado para '${missingSourceCol.sourceCol}') não foi encontrado. Verifique se o Delimitador CSV está correto.`);
         }
     }
 
     await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
 
-    // 2. Define qual função chamar
     let processFunction = null;
     let mapeamento = null;
     let systemId = null;
@@ -434,10 +574,8 @@ const handleDirectoryProcess = async (req, res) => {
             break;
     }
 
-    // 3. Executa
     const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
 
-    // 4. Finaliza Log
     const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
     const finishedLog = await prisma.importLog.update({
         where: { id: importLog.id },
@@ -470,7 +608,6 @@ const handleDatabaseSync = async (req, res) => {
 
   if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
 
-  // Lógica de validação de rota (Mantida)
   let isTargetDatabase = dataSource.type_datasource === 'DATABASE'; 
   if (dataSource.origem_datasource === 'SISTEMA') {
       const config = dataSource.systemConfig;
@@ -479,7 +616,7 @@ const handleDatabaseSync = async (req, res) => {
       else isTargetDatabase = false; 
   }
   if (!isTargetDatabase) {
-      return res.status(400).json({ message: "A fonte selecionada está configurada como Arquivo/API. Use a rota de processamento de diretório." });
+      return res.status(400).json({ message: "A fonte selecionada está configurada como Arquivo/API." });
   }
 
   const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
@@ -488,7 +625,6 @@ const handleDatabaseSync = async (req, res) => {
   });
 
   try {
-    // 1. Conecta e busca dados
     let dbConfig = null;
     let tableName = null;
 
@@ -504,11 +640,12 @@ const handleDatabaseSync = async (req, res) => {
 
     await prisma.importLog.update({ where: { id: importLog.id }, data: { fileName: `Tabela: ${tableName}` } });
 
+    // --- AQUI ACONTECE A MÁGICA HÍBRIDA (Oracle/Postgres) ---
     const rows = await fetchDataFromDatabase(dbConfig, tableName);
     
     if (!rows.length) throw new Error("A tabela está vazia.");
 
-    // Validação Dinâmica de Colunas (Mantida)
+    // Validação Dinâmica de Colunas (Para Banco)
     if (dataSource.origem_datasource === 'SISTEMA' && processingTarget === 'CONTAS' && rows.length > 0) {
         const requiredMappings = ['accounts_id_in_system', 'accounts_email', 'accounts_identity_id', 'accounts_resource_name'];
         const availableKeys = Object.keys(rows[0] || {});
@@ -516,17 +653,21 @@ const handleDatabaseSync = async (req, res) => {
         let missingSourceCol = null;
         for (const appField of requiredMappings) {
             const sourceCol = dataSource.mappingSystem?.[appField];
-            if (sourceCol && !availableKeys.includes(sourceCol)) {
-                missingSourceCol = { appField, sourceCol };
-                break;
+            
+            // Check robusto: Verifica exato OU UpperCase (Oracle)
+            if (sourceCol) {
+                const exists = availableKeys.includes(sourceCol) || availableKeys.includes(sourceCol.toUpperCase());
+                if (!exists) {
+                    missingSourceCol = { appField, sourceCol };
+                    break;
+                }
             }
         }
 
         if (missingSourceCol) {
-            throw new Error(`COLUNA CRÍTICA AUSENTE: O campo obrigatório '${missingSourceCol.appField}' (mapeado para '${missingSourceCol.sourceCol}') não foi encontrado na tabela do banco de dados. Verifique o mapeamento (caixa alta/baixa).`);
+            throw new Error(`COLUNA CRÍTICA AUSENTE: O campo obrigatório '${missingSourceCol.appField}' (mapeado para '${missingSourceCol.sourceCol}') não foi encontrado na tabela.`);
         }
     }
-
 
     await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
 
@@ -554,10 +695,8 @@ const handleDatabaseSync = async (req, res) => {
             break;
     }
 
-    // 3. Executa
     const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
 
-    // 4. Finaliza Log
     const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
     const finishedLog = await prisma.importLog.update({
         where: { id: importLog.id },
@@ -576,8 +715,101 @@ const handleDatabaseSync = async (req, res) => {
   }
 };
 
+// --- NOVO: ROTA DE PROCESSAMENTO DE API (SYNC) ---
+const handleApiSync = async (req, res) => {
+  const user = req.user;
+  const { dataSourceId, processingTarget } = req.body; 
 
-// ROTA C: UPLOAD MANUAL (LEGADO / ARRASTAR ARQUIVO)
+  if (!user || !dataSourceId || !processingTarget) return res.status(400).json({ message: "Dados incompletos." });
+
+  const dataSource = await prisma.dataSource.findFirst({
+    where: { id: parseInt(dataSourceId), userId: parseInt(user.id) },
+    include: { hrConfig: true, systemConfig: { include: { system: true } }, mappingRH: true, mappingSystem: true }
+  });
+
+  if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
+
+  let isTargetApi = dataSource.type_datasource === 'API'; 
+  if (dataSource.origem_datasource === 'SISTEMA') {
+      const config = dataSource.systemConfig;
+      if (processingTarget === 'CONTAS' && config?.tipo_fonte_contas === 'API') isTargetApi = true;
+      else if (processingTarget === 'RECURSOS' && config?.tipo_fonte_recursos === 'API') isTargetApi = true;
+      else isTargetApi = false; 
+  }
+  if (!isTargetApi) return res.status(400).json({ message: "A fonte selecionada não é do tipo API." });
+
+  const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
+  const importLog = await prisma.importLog.create({
+    data: { fileName: "Conectando API...", status: "PENDING", userId: parseInt(user.id), dataSourceId: dataSource.id, processingTarget: logTarget },
+  });
+
+  try {
+    let apiConfig = {};
+    
+    // Monta a config para o Helper
+    if (dataSource.origem_datasource === 'RH') {
+        const c = dataSource.hrConfig;
+        apiConfig = {
+            api_url: c.api_url,
+            api_method: c.api_method,
+            api_headers: c.api_headers,
+            api_body: c.api_body,
+            api_response_path: c.api_response_path
+        };
+    } else {
+        const c = dataSource.systemConfig;
+        // Para sistemas, a URL específica está nos campos "diretorio_*" (convenção do modal)
+        const specificUrl = processingTarget === 'CONTAS' ? c.diretorio_contas : c.diretorio_recursos;
+        
+        apiConfig = {
+            api_url: specificUrl,
+            api_method: c.api_method,
+            api_headers: c.api_headers,
+            api_body: c.api_body,
+            api_response_path: c.api_response_path
+        };
+    }
+
+    await prisma.importLog.update({ where: { id: importLog.id }, data: { fileName: `API: ${apiConfig.api_url}` } });
+
+    // Busca dados via Axios/XML2JS
+    const rows = await fetchDataFromApi(apiConfig);
+    
+    if (!rows.length) throw new Error("A API retornou uma lista vazia.");
+    await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
+
+    // Processamento igual ao DB/CSV
+    let processFunction, mapeamento, systemId, resourceCache = new Map();
+    if(dataSource.origem_datasource === 'RH') {
+        mapeamento = dataSource.mappingRH;
+        processFunction = (db, r) => processAndSaveData_RH(db, dataSource.id, r, mapeamento);
+    } else {
+        systemId = dataSource.systemConfig.systemId;
+        mapeamento = dataSource.mappingSystem;
+        if(processingTarget === "CONTAS") {
+            const res = await prisma.resource.findMany({ where: { systemId }, select: { id: true, name_resource: true } });
+            resourceCache = new Map(res.map(r => [r.name_resource.trim(), r.id]));
+            processFunction = (db, r) => processAndSaveData_Contas(db, systemId, r, mapeamento, resourceCache);
+        } else {
+            processFunction = (db, r) => processAndSaveData_Recursos(db, systemId, r, mapeamento);
+        }
+    }
+
+    const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
+    const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
+    await prisma.importLog.update({
+        where: { id: importLog.id },
+        data: { status: hasErrors ? "FAILED" : "SUCCESS", processedRows: processedCount, completedAt: new Date(), errorDetails: warningsOrErrors.join('\n') }
+    });
+    return res.status(201).json({ processedCount });
+
+  } catch (error) {
+    await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "FAILED", errorDetails: error.message, completedAt: new Date() } });
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// ROTA C: UPLOAD MANUAL (LEGADO)
 const handleUploadProcess = async (req, res) => {
   const user = req.user;
   const { dataSourceId, processingTarget } = req.body; 
@@ -598,7 +830,24 @@ const handleUploadProcess = async (req, res) => {
 
   try {
     const fileContent = file.buffer.toString("utf8");
-    const parsedCsv = Papa.parse(fileContent, { header: true, skipEmptyLines: true });
+    
+    // Busca config de delimitador (se disponível)
+    let delimiter = ",";
+    let quote = '"';
+    if (dataSource.origem_datasource === 'RH') {
+         delimiter = dataSource.hrConfig?.csv_delimiter || ",";
+         quote = dataSource.hrConfig?.csv_quote || '"';
+    } else if (dataSource.origem_datasource === 'SISTEMA') {
+         delimiter = dataSource.systemConfig?.csv_delimiter || ",";
+         quote = dataSource.systemConfig?.csv_quote || '"';
+    }
+
+    const parsedCsv = Papa.parse(fileContent, { 
+        header: true, 
+        skipEmptyLines: true,
+        delimiter: delimiter,
+        quoteChar: quote
+    });
     const rows = parsedCsv.data;
     
     let processFunction = null;
@@ -651,18 +900,12 @@ const handleUploadProcess = async (req, res) => {
 // DEFINIÇÃO DE ROTAS
 // ===========================================================================
 
-// ... (getImportHistory e deleteImportLog permanecem inalterados) ...
-
 router.get("/", passport.authenticate("jwt", { session: false }), getImportHistory);
 router.delete("/:id", passport.authenticate("jwt", { session: false }), deleteImportLog);
 
-// 1. Rota para DIRETÓRIO
 router.post("/process-directory", passport.authenticate("jwt", { session: false }), handleDirectoryProcess);
-
-// 2. Rota para BANCO DE DADOS
 router.post("/sync-db", passport.authenticate("jwt", { session: false }), handleDatabaseSync);
-
-// 3. Rota para UPLOAD MANUAL (LEGADO)
+router.post("/sync-api", passport.authenticate("jwt", { session: false }), handleApiSync); // Rota API
 router.post("/upload", passport.authenticate("jwt", { session: false }), upload.single("csvFile"), handleUploadProcess);
 
 export default router;

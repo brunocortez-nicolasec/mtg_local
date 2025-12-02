@@ -78,7 +78,6 @@ function MapeamentoDados() {
   const [mappings, setMappings] = useState({});
   const [notification, setNotification] = useState({ open: false, color: "info", message: "" });
 
-  // --- CORREÇÃO 1: URL CORRETA ---
   const API_URL = process.env.REACT_APP_API_URL;
 
   const api = axios.create({
@@ -94,8 +93,6 @@ function MapeamentoDados() {
         const response = await api.get("/systems");
         const data = response.data;
         
-        // --- CORREÇÃO 2: BLINDAGEM DE ARRAY ---
-        // Se der erro e vier null/undefined/html, força array vazio
         const safeData = Array.isArray(data) ? data : [];
         setAllDataSources(safeData);
 
@@ -115,7 +112,7 @@ function MapeamentoDados() {
       } catch (err) {
         console.error("Erro ao buscar fontes:", err);
         setPageError("Erro ao buscar lista de fontes.");
-        setAllDataSources([]); // Garante estado limpo em caso de erro
+        setAllDataSources([]); 
       } finally {
         setLoadingList(false);
       }
@@ -123,7 +120,7 @@ function MapeamentoDados() {
     fetchAllDataSources();
   }, [id]);
 
-  // 2. Hook: Busca colunas
+  // 2. Hook: Busca colunas (Já compatível com API)
   const { columns: sourceColumns, loading: loadingCols, error: colsError } = useColumnFetcher(selectedDataSource, mappingTarget);
 
 
@@ -252,15 +249,33 @@ function MapeamentoDados() {
      return formFields.some(f => f.required && !f.value);
   }, [formFields]);
 
-  // --- CORREÇÃO 3: BLINDAGEM DO FILTRO ---
   const filteredDataSources = useMemo(() => {
     if (!selectedOrigem) return [];
-    // Garante que allDataSources é array antes de filtrar
     const safeSources = Array.isArray(allDataSources) ? allDataSources : [];
     return safeSources.filter(ds => ds.origem_datasource === selectedOrigem);
   }, [allDataSources, selectedOrigem]);
 
   const closeNotification = () => setNotification({ ...notification, open: false });
+
+  // Helper para mostrar o tipo correto na UI
+  const getSourceTypeLabel = () => {
+      if (!selectedDataSource) return 'CSV';
+      
+      // Lógica para detectar se é API, DB ou CSV e mostrar na tela
+      if (selectedDataSource.type_datasource === 'API') return 'API (JSON/XML)';
+      if (selectedDataSource.type_datasource === 'DATABASE') return 'Banco de Dados';
+      
+      // Fallback para sistemas híbridos
+      if (selectedDataSource.origem_datasource === 'SISTEMA' && selectedDataSource.systemConfig) {
+          const type = mappingTarget === 'CONTAS' 
+            ? selectedDataSource.systemConfig.tipo_fonte_contas 
+            : selectedDataSource.systemConfig.tipo_fonte_recursos;
+          
+          if (type === 'API') return 'API';
+          if (type === 'DATABASE') return 'Banco de Dados';
+      }
+      return 'CSV';
+  };
 
 
   return (
@@ -290,7 +305,6 @@ function MapeamentoDados() {
                           value={selectedOrigem}
                           onChange={handleOrigemChange}
                           renderInput={(params) => <MDInput {...params} label="1. Selecionar Tipo de Origem" variant="outlined" />}
-                          ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                           fullWidth
                         />
                       </Grid>
@@ -302,7 +316,6 @@ function MapeamentoDados() {
                           disabled={!selectedOrigem || filteredDataSources.length === 0}
                           onChange={handleDropdownChange}
                           renderInput={(params) => <MDInput {...params} label="2. Selecionar Fonte de Dados" variant="outlined" />}
-                          ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                           fullWidth
                         />
                       </Grid>
@@ -343,7 +356,8 @@ function MapeamentoDados() {
               ) : (
                 <MappingForm 
                     title={`Colunas da Aplicação (${selectedDataSource.origem_datasource === "SISTEMA" ? mappingTarget : selectedDataSource.origem_datasource})`}
-                    description={`Mapeie as colunas da sua fonte de dados (${selectedDataSource.type_datasource || 'CSV'}) para os campos da aplicação.`}
+                    // Texto adaptativo
+                    description={`Mapeie as colunas da sua fonte de dados (${getSourceTypeLabel()}) para os campos da aplicação.`}
                     fields={formFields}
                     availableColumns={sourceColumns} 
                     onMappingChange={handleMappingChange}

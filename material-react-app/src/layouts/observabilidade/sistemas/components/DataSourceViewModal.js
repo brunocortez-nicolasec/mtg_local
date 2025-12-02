@@ -68,31 +68,36 @@ function DataSourceViewModal({ open, onClose, dataSource, darkMode }) {
     "Diretório Recursos": "folder_special",
     "Tabela Contas": "table_view",
     "Tabela Recursos": "table_view",
+    "Tabela RH": "table_view",
     // API
     "API URL": "link",
     "API User": "person",
-    // Banco de Dados - Geral
+    "Endpoint": "link",
+    "Endpoint Contas": "link",
+    "Endpoint Recursos": "link",
+    "Método": "http",
+    "Headers": "code",
+    "Body": "description",
+    // Banco de Dados
     "Tipo de Banco": "dns",
     "Método de Conexão": "settings_ethernet",
     "Schema Padrão": "schema",
-    // Banco de Dados - Host
     "Host": "router",
     "Porta": "settings_input_hdmi",
     "Nome do Banco": "storage",
     "Usuário DB": "person_pin",
-    // Banco de Dados - URL
     "URL de Conexão": "link",
+    // CSV Configs
+    "Delimitador": "space_bar",
+    "Caractere de Citação": "format_quote",
   };
 
-  // Helper para preencher dados de DB
+  // Helper DB
   const fillDbDetails = (config) => {
       const details = {};
-      
-      // Tipo e Método
-      details["Tipo de Banco"] = config.db_type || "postgres"; // Default postgres se nulo
+      details["Tipo de Banco"] = config.db_type || "postgres"; 
       details["Método de Conexão"] = config.db_connection_type === 'URL' ? "URL de Conexão" : "Host / Porta";
 
-      // Detalhes Específicos
       if (config.db_connection_type === 'URL') {
           details["URL de Conexão"] = config.db_url;
       } else {
@@ -101,10 +106,36 @@ function DataSourceViewModal({ open, onClose, dataSource, darkMode }) {
           details["Nome do Banco"] = config.db_name;
           details["Usuário DB"] = config.db_user;
       }
-
-      // Schema (Sempre útil)
       details["Schema Padrão"] = config.db_schema || "public";
       return details;
+  };
+
+  // Helper CSV
+  const fillCsvDetails = (config) => {
+      return {
+          "Delimitador": config.csv_delimiter,
+          "Caractere de Citação": config.csv_quote
+      };
+  };
+
+  // Helper API (NOVO)
+  const fillApiDetails = (config) => {
+      // Formata headers JSON para string legível
+      let headersStr = "";
+      if (config.api_headers) {
+          try {
+             // Se já for objeto
+             if (typeof config.api_headers === 'object') headersStr = JSON.stringify(config.api_headers); 
+             // Se for string
+             else headersStr = config.api_headers;
+          } catch(e) { headersStr = String(config.api_headers); }
+      }
+
+      return {
+          "Método": config.api_method || "GET",
+          "Headers": headersStr.length > 50 ? headersStr.substring(0, 50) + "..." : headersStr,
+          "Body": config.api_body ? "(Configurado)" : "Nenhum"
+      };
   };
 
   // --- Lógica por Origem ---
@@ -112,18 +143,27 @@ function DataSourceViewModal({ open, onClose, dataSource, darkMode }) {
   // 1. RH
   if (dataSource.origem_datasource === "RH" && dataSource.hrConfig) {
     const config = dataSource.hrConfig;
-    // Verifica se é DB (se tem host ou url preenchido) ou CSV
+    
+    // Prioridade: API > DB > CSV
+    const isApi = config.api_url; 
     const isDb = config.db_host || config.db_url;
 
-    if (isDb) {
+    if (isApi) {
+        connectionDetails = {
+            "Endpoint": config.api_url,
+            ...fillApiDetails(config)
+        };
+    } else if (isDb) {
         connectionDetails = fillDbDetails(config);
-        connectionDetails["Tabela RH"] = config.db_table; // Nome específico para RH
-        iconMap["Tabela RH"] = "table_view";
+        connectionDetails["Tabela RH"] = config.db_table; 
     } else {
-        connectionDetails = { "Diretório (Servidor)": config.diretorio_hr };
+        connectionDetails = { 
+            "Diretório (Servidor)": config.diretorio_hr,
+            ...fillCsvDetails(config)
+        };
     }
   } 
-  // 2. IDM
+  // 2. IDM (Legado API)
   else if (dataSource.origem_datasource === "IDM" && dataSource.idmConfig) {
     connectionDetails = {
       "API URL": dataSource.idmConfig.api_url,
@@ -134,24 +174,39 @@ function DataSourceViewModal({ open, onClose, dataSource, darkMode }) {
   else if (dataSource.origem_datasource === "SISTEMA" && dataSource.systemConfig) {
     const config = dataSource.systemConfig;
 
-    // Verifica se alguma das fontes usa banco de dados
-    const isDbContas = config.tipo_fonte_contas === 'DATABASE';
-    const isDbRecursos = config.tipo_fonte_recursos === 'DATABASE';
+    const typeContas = config.tipo_fonte_contas;
+    const typeRecursos = config.tipo_fonte_recursos;
 
-    if (isDbContas || isDbRecursos) {
+    // Se ALGUM for DB, mostra dados de DB
+    if (typeContas === 'DATABASE' || typeRecursos === 'DATABASE') {
         const dbInfo = fillDbDetails(config);
         connectionDetails = { ...connectionDetails, ...dbInfo };
     }
 
-    // Adiciona os caminhos/tabelas
-    const labelContas = isDbContas ? "Tabela Contas" : "Diretório Contas";
-    const labelRecursos = isDbRecursos ? "Tabela Recursos" : "Diretório Recursos";
+    // Se ALGUM for API, mostra dados de API (Headers/Auth globais)
+    if (typeContas === 'API' || typeRecursos === 'API') {
+        const apiInfo = fillApiDetails(config);
+        connectionDetails = { ...connectionDetails, ...apiInfo };
+    }
 
-    connectionDetails[labelContas] = config.diretorio_contas;
-    connectionDetails[labelRecursos] = config.diretorio_recursos;
+    // Labels dinâmicos para os campos principais (que mudam de nome dependendo do tipo)
+    // Contas
+    if (typeContas === 'API') connectionDetails["Endpoint Contas"] = config.diretorio_contas;
+    else if (typeContas === 'DATABASE') connectionDetails["Tabela Contas"] = config.diretorio_contas;
+    else connectionDetails["Diretório Contas"] = config.diretorio_contas; // CSV
+
+    // Recursos
+    if (typeRecursos === 'API') connectionDetails["Endpoint Recursos"] = config.diretorio_recursos;
+    else if (typeRecursos === 'DATABASE') connectionDetails["Tabela Recursos"] = config.diretorio_recursos;
+    else connectionDetails["Diretório Recursos"] = config.diretorio_recursos; // CSV
+
+    // Se ALGUM for CSV, mostra configs CSV
+    if (typeContas === 'CSV' || typeRecursos === 'CSV') {
+        const csvInfo = fillCsvDetails(config);
+        connectionDetails = { ...connectionDetails, ...csvInfo };
+    }
   }
 
-  // Filtra campos nulos/undefined (mas mantém strings vazias se desejar mostrar que está vazio, aqui filtramos tudo que é falsy/nulo)
   const connectionFields = Object.entries(connectionDetails).filter(
     ([_, val]) => val !== null && val !== undefined && val !== ""
   );

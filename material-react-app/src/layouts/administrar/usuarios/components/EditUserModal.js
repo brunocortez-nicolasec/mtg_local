@@ -1,3 +1,5 @@
+// material-react-app/src/layouts/administrar/usuarios/components/EditUserModal.js
+
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import axios from "axios";
@@ -12,13 +14,21 @@ import DialogTitle from "@mui/material/DialogTitle";
 import MDBox from "components/MDBox";
 import MDInput from "components/MDInput";
 import MDButton from "components/MDButton";
+import MDTypography from "components/MDTypography";
 
 function EditUserModal({ open, onClose, user, onSave }) {
-  const [userData, setUserData] = useState({ name: "", email: "", role: "", packageId: "" });
+  const [userData, setUserData] = useState({ 
+    name: "", 
+    email: "", 
+    role: "", 
+    packageId: "", 
+    password: "", 
+    confirmPassword: "" 
+  });
+  
   const [profiles, setProfiles] = useState([]);
   const [packages, setPackages] = useState([]);
 
-  // --- CORREÇÃO: URL CORRETA ---
   const API_URL = process.env.REACT_APP_API_URL;
 
   const api = axios.create({
@@ -26,12 +36,34 @@ function EditUserModal({ open, onClose, user, onSave }) {
     headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
   });
 
+  // --- LÓGICA DE VALIDAÇÃO DE SENHA (COMPLEXIDADE) ---
+  const passwordChanged = userData.password.length > 0;
+  
+  // Regex para validações
+  const hasUpperCase = /[A-Z]/.test(userData.password);
+  const hasLowerCase = /[a-z]/.test(userData.password);
+  const hasNumber = /\d/.test(userData.password);
+  const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(userData.password);
+  const hasMinLength = userData.password.length >= 8;
+
+  // Valida se cumpre todos os requisitos
+  const isPasswordComplex = hasMinLength && hasUpperCase && hasLowerCase && hasNumber && hasSpecialChar;
+  
+  // Erro de complexidade só aparece se o utilizador já começou a digitar
+  const complexityError = passwordChanged && !isPasswordComplex;
+
+  // Valida igualdade (Confirmação)
+  const passwordsMatch = userData.password === userData.confirmPassword;
+  const matchError = passwordChanged && !passwordsMatch;
+
+  // Bloqueia botão se houver qualquer erro
+  const isSaveDisabled = passwordChanged && (complexityError || matchError);
+
   useEffect(() => {
     const fetchProfiles = async () => {
       try {
         const response = await api.get("/profiles"); 
         const data = response.data;
-        // Blindagem de Array
         setProfiles(Array.isArray(data) ? data : []); 
       } catch (error) {
         console.error("Erro ao buscar perfis:", error); 
@@ -43,7 +75,6 @@ function EditUserModal({ open, onClose, user, onSave }) {
       try {
         const response = await api.get("/packages");
         const data = response.data;
-        // Blindagem de Array
         setPackages(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Erro ao buscar pacotes:", error);
@@ -64,6 +95,8 @@ function EditUserModal({ open, onClose, user, onSave }) {
         email: user.email || "",
         role: user.profile?.name || "", 
         packageId: user.packageId || "",
+        password: "",       
+        confirmPassword: "" 
       });
     }
   }, [user]);
@@ -73,7 +106,17 @@ function EditUserModal({ open, onClose, user, onSave }) {
   };
 
   const handleSave = () => {
-    onSave(user.id, userData);
+    // Segurança final antes de enviar
+    if (isSaveDisabled) return;
+
+    const payload = { ...userData };
+    delete payload.confirmPassword;
+
+    if (!payload.password) {
+        delete payload.password;
+    }
+
+    onSave(user.id, payload);
     onClose();
   };
 
@@ -102,6 +145,41 @@ function EditUserModal({ open, onClose, user, onSave }) {
               fullWidth
             />
           </MDBox>
+          
+          {/* --- BLOCO DE SENHA COM VALIDAÇÃO DE COMPLEXIDADE --- */}
+          <MDBox mb={2}>
+            <MDInput
+              type="password"
+              label="Nova Senha"
+              name="password"
+              value={userData.password}
+              onChange={handleChange}
+              fullWidth
+              placeholder="Deixe em branco para não alterar"
+              error={complexityError} 
+              helperText={complexityError 
+                ? "A senha deve ter mín. 8 caracteres, maiúscula, minúscula, número e caractere especial." 
+                : "Requisitos: 8 caracteres, maiúscula, minúscula, número e especial."
+              }
+            />
+          </MDBox>
+          
+          {passwordChanged && (
+             <MDBox mb={2}>
+                <MDInput
+                  type="password"
+                  label="Confirmar Nova Senha"
+                  name="confirmPassword"
+                  value={userData.confirmPassword}
+                  onChange={handleChange}
+                  fullWidth
+                  placeholder="Repita a nova senha"
+                  error={matchError} 
+                  helperText={matchError ? "As senhas não coincidem." : ""}
+                />
+             </MDBox>
+          )}
+
           <MDBox mb={2}>
             <FormControl fullWidth>
               <InputLabel id="role-select-label">Função (Perfil)</InputLabel>
@@ -151,7 +229,12 @@ function EditUserModal({ open, onClose, user, onSave }) {
         <MDButton onClick={onClose} color="secondary">
           Cancelar
         </MDButton>
-        <MDButton onClick={handleSave} variant="contained" color="info">
+        <MDButton 
+            onClick={handleSave} 
+            variant="contained" 
+            color="info"
+            disabled={isSaveDisabled} // Bloqueia se a senha for fraca ou não coincidir
+        >
           Salvar
         </MDButton>
       </DialogActions>

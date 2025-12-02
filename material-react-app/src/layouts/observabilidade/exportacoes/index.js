@@ -285,7 +285,6 @@ function PaginaExportacoes() {
                         onChange={(event, newValue) => { setReportType(newValue ? newValue.value : "contas"); }}
                         getOptionLabel={(option) => option.label}
                         getOptionDisabled={(option) => option.disabled || false}
-                        ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" }, }}
                         renderInput={(params) => ( <MDInput {...params} label="Tipo de Relatório" variant="outlined" /> )}
                         disabled={loadingSystems || isExporting}
                         fullWidth
@@ -298,7 +297,6 @@ function PaginaExportacoes() {
                         value={currentSystemValue}
                         onChange={(event, newValue) => { setSystemId(newValue ? newValue.id : "todos"); }}
                         getOptionLabel={(option) => option.name_system}
-                        ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" }, }}
                         renderInput={(params) => ( <MDInput {...params} label="Sistema" variant="outlined" /> )}
                         disabled={isSystemFilterDisabled} 
                         fullWidth
@@ -353,7 +351,6 @@ function PaginaExportacoes() {
                         }}
                         getOptionLabel={(option) => option.label}
                         getOptionDisabled={(option) => option.disabled || false}
-                        ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                         renderInput={(params) => (
                           <MDInput {...params} label="Formato de Saída" variant="outlined" />
                         )}
@@ -398,7 +395,6 @@ function PaginaExportacoes() {
               value={identityStatusOptions.find(o => o.value === tempFilters.identityStatus) || null}
               onChange={(e, val) => handleTempAutocompleteChange('identityStatus', val ? val.value : 'todos')} 
               getOptionLabel={(option) => option.label}
-              ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
               renderInput={(params) => <TextField {...params} label="Status da Identidade (RH)" size="small"/>} 
               fullWidth
             />
@@ -411,7 +407,6 @@ function PaginaExportacoes() {
               value={accountStatusOptions.find(o => o.value === tempFilters.accountStatus) || null}
               onChange={(e, val) => handleTempAutocompleteChange('accountStatus', val ? val.value : 'todos')} 
               getOptionLabel={(option) => option.label}
-              ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
               renderInput={(params) => <TextField {...params} label="Status da Conta (App)" size="small"/>} 
               fullWidth
             />
@@ -425,7 +420,6 @@ function PaginaExportacoes() {
               value={tempFilters.divergenceType}
               onChange={(event, newValue) => handleTempAutocompleteChange('divergenceType', newValue)} 
               isOptionEqualToValue={(option, value) => option.code === value?.code}
-              ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
               renderInput={(params) => <TextField {...params} label="Tipo de Divergência" size="small"/>} 
               fullWidth
             />
@@ -438,7 +432,6 @@ function PaginaExportacoes() {
               value={divergenceStatusOptions.find(o => o.value === tempFilters.divergenceStatus) || null}
               onChange={(e, val) => handleTempAutocompleteChange('divergenceStatus', val ? val.value : 'divergent_only')} 
               getOptionLabel={(option) => option.label}
-              ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
               renderInput={(params) => <TextField {...params} label="Status da Divergência" size="small"/>} 
               fullWidth
               disableClearable

@@ -13,18 +13,30 @@ import MDBox from "components/MDBox";
 import usersTableData from "./data/usersTableData";
 import MDInput from "components/MDInput";
 
+// Imports para o Modal de Reset
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
+import MDButton from "components/MDButton";
+import Icon from "@mui/material/Icon";
+
 function GerenciarUsuarios() {
     const [users, setUsers] = useState([]);
     const [notification, setNotification] = useState({ show: false, color: "info", message: "" });
+    
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedUser, setSelectedUser] = useState(null);
+    
+    // Estado para o Modal de Reset de Senha
+    const [resetDialog, setResetDialog] = useState({ open: false, tempPassword: "", userName: "" });
+    
     const [tableData, setTableData] = useState({ columns: [], rows: [] });
     const [loading, setLoading] = useState(true);
-    
     const [searchText, setSearchText] = useState("");
 
-    // --- CORREÇÃO: URL CORRETA ---
     const API_URL = process.env.REACT_APP_API_URL;
 
     const api = axios.create({
@@ -36,12 +48,11 @@ function GerenciarUsuarios() {
         try {
             setLoading(true);
             const response = await api.get("/users");
-            // Blindagem de Array
             const data = response.data;
             setUsers(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error("Erro ao buscar usuários:", error);
-            setUsers([]); // Garante array vazio
+            setUsers([]);
             setNotification({ show: true, color: "error", message: "Erro ao carregar usuários." });
         } finally {
             setLoading(false);
@@ -61,14 +72,14 @@ function GerenciarUsuarios() {
         }
     }, [notification]);
 
-    // Agora users é garantido ser um array, então filter não quebra
     const filteredUsers = useMemo(() =>
         users.filter(user =>
             user.name?.toLowerCase().includes(searchText.toLowerCase())
         ), [users, searchText]);
 
     useEffect(() => {
-        const formattedData = usersTableData(filteredUsers, handleEditClick, handleDeleteClick);
+        // Passamos o handleResetUser para o data.js
+        const formattedData = usersTableData(filteredUsers, handleEditClick, handleDeleteClick, handleResetUser);
         setTableData(formattedData);
     }, [filteredUsers]);
 
@@ -87,6 +98,27 @@ function GerenciarUsuarios() {
         setIsAddModalOpen(false);
     };
 
+    // --- NOVA FUNÇÃO: RESET DE SENHA ---
+    const handleResetUser = async (user) => {
+        if (!window.confirm(`Deseja resetar a senha do usuário ${user.name}?`)) return;
+
+        try {
+            const response = await api.post(`/users/${user.id}/reset-password`);
+            const { tempPassword } = response.data;
+            
+            // Abre o modal com a senha
+            setResetDialog({ open: true, tempPassword, userName: user.name });
+            setNotification({ show: true, color: "success", message: "Senha resetada com sucesso!" });
+        } catch (error) {
+            console.error("Erro ao resetar senha:", error);
+            setNotification({ show: true, color: "error", message: "Erro ao resetar senha." });
+        }
+    };
+    
+    const handleCloseResetDialog = () => {
+        setResetDialog({ open: false, tempPassword: "", userName: "" });
+    };
+
     const handleSaveUser = async (id, updatedData) => {
         try {
             await api.patch(`/users/${id}`, updatedData);
@@ -95,7 +127,7 @@ function GerenciarUsuarios() {
             handleCloseEditModal();
         } catch (error) {
             console.error("Erro ao salvar usuário:", error);
-            setNotification({ show: true, color: "error", message: "Erro ao salvar alterações." });
+            setNotification({ show: true, color: "error", message: error.response?.data?.message || "Erro ao salvar alterações." });
         }
     };
 
@@ -169,6 +201,53 @@ function GerenciarUsuarios() {
                 onClose={handleCloseAddModal}
                 onSave={handleCreateUser}
             />
+
+            {/* --- MODAL DE SUCESSO DO RESET DE SENHA --- */}
+            <Dialog
+                open={resetDialog.open}
+                onClose={handleCloseResetDialog}
+                aria-labelledby="alert-dialog-title"
+                aria-describedby="alert-dialog-description"
+            >
+                <DialogTitle id="alert-dialog-title">
+                    {"Senha Resetada com Sucesso"}
+                </DialogTitle>
+                <DialogContent>
+                    <DialogContentText id="alert-dialog-description">
+                        A senha do usuário <strong>{resetDialog.userName}</strong> foi alterada.
+                        <br /><br />
+                        Informe a seguinte senha temporária para o usuário:
+                    </DialogContentText>
+                    
+                    <MDBox 
+                        bgColor="grey.200" 
+                        p={2} 
+                        my={2} 
+                        borderRadius="lg" 
+                        textAlign="center"
+                        display="flex"
+                        alignItems="center"
+                        justifyContent="center"
+                        gap={1}
+                    >
+                        <MDTypography variant="h4" color="dark" fontWeight="bold" sx={{ letterSpacing: '2px' }}>
+                            {resetDialog.tempPassword}
+                        </MDTypography>
+                    </MDBox>
+
+                    <MDAlert color="warning">
+                        <MDTypography variant="caption" color="white" fontWeight="medium">
+                             Aviso: O usuário deve alterar esta senha imediatamente após o próximo login.
+                        </MDTypography>
+                    </MDAlert>
+                </DialogContent>
+                <DialogActions>
+                    <MDButton onClick={handleCloseResetDialog} color="info" variant="gradient" autoFocus>
+                        Entendi
+                    </MDButton>
+                </DialogActions>
+            </Dialog>
+
         </AdminPageLayout>
     );
 }

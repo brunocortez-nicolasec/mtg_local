@@ -64,7 +64,7 @@ function Login() {
       const token = loginResponse.token;
 
       // --- CORREÇÃO AQUI: Força a URL correta usando a variável de ambiente ---
-      const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8080";
+      const API_URL = process.env.REACT_APP_API_URL;
       
       // Concatena a URL base com o endpoint /me para garantir que bata no Backend
       const userResponse = await axios.get(`${API_URL}/me`, {
@@ -177,21 +177,6 @@ function Login() {
                   textGradient
                 >
                   Clique para redefinir
-                </MDTypography>
-              </MDTypography>
-            </MDBox>
-            <MDBox mb={1} textAlign="center">
-              <MDTypography variant="button" color="text">
-                Não possui uma conta?{" "}
-                <MDTypography
-                  component={Link}
-                  to="/auth/register"
-                  variant="button"
-                  color="info"
-                  fontWeight="medium"
-                  textGradient
-                >
-                  Inscreva-se
                 </MDTypography>
               </MDTypography>
             </MDBox>

@@ -1,35 +1,38 @@
 import express from "express";
 import passport from "passport";
-import { PrismaClient, Prisma } from "@prisma/client"; // Importar Prisma
+import { PrismaClient, Prisma } from "@prisma/client";
 
 const prisma = new PrismaClient();
 const router = express.Router();
 
-// --- Constantes ---
-const validComparisonOperators = [
-  "equals", "not_equals", "contains", "starts_with", "ends_with"
-];
-
 // --- Funções Auxiliares ---
-const formatAccountProfiles = (account) => {
-    if (account && account.profiles) {
-        const profileList = account.profiles.map(ap => ap.profile).filter(p => !!p);
-        return { ...account, profiles: profileList };
+// Adapta a resposta para ficar mais limpa, transformando 'assignments' em uma lista de 'resources'
+const formatAccountResponse = (account) => {
+    if (!account) return null;
+    
+    let formatted = { ...account };
+
+    // Achata a estrutura de assignments para retornar uma lista simples de recursos/perfis
+    if (account.assignments) {
+        const profileList = account.assignments.map(a => a.resource).filter(r => !!r);
+        formatted.profiles = profileList; // Mantém compatibilidade com o nome 'profiles' que você usava
+        delete formatted.assignments;
     }
-    return account;
+    return formatted;
 };
 
 // --- Funções de Rota ---
 
 /**
  * @route   GET /accounts
- * @desc    Busca contas, opcionalmente filtradas.
+ * @desc    Busca contas. Suporta filtros: ?identityId=1 & ?systemId=2 & ?includeProfiles=true
  * @access  Private
  */
 const getAccounts = async (req, res) => {
     const { identityId, systemId, includeProfiles } = req.query;
     const whereClause = {};
 
+    // Filtro por Identidade (RH)
     if (identityId) {
         const identityIdInt = parseInt(identityId, 10);
         if (!isNaN(identityIdInt)) {
@@ -39,6 +42,7 @@ const getAccounts = async (req, res) => {
         }
     }
 
+    // Filtro por Sistema
     if (systemId) {
         const systemIdInt = parseInt(systemId, 10);
         if (!isNaN(systemIdInt)) {
@@ -48,30 +52,39 @@ const getAccounts = async (req, res) => {
         }
     }
 
+    // Configura os Includes (Joins)
     const includeClause = {
-        identity: { select: { id: true, name: true, email: true, cpf: true } },
-        system: { select: { id: true, name: true, type: true } }
+        identity: { 
+            select: { id: true, name_hr: true, email_hr: true, cpf_hr: true } // Campos do schema atual
+        },
+        system: { 
+            select: { id: true, name_system: true, description_system: true } // Campos do schema atual
+        }
     };
 
+    // Se pedir perfis, inclui os assignments e os resources
     if (includeProfiles === 'true') {
-        includeClause.profiles = {
+        includeClause.assignments = {
             include: {
-                profile: { select: { id: true, name: true } }
+                resource: { 
+                    select: { id: true, name_resource: true, description_resource: true } 
+                }
             }
         };
     }
 
     try {
-        const accounts = await prisma.account.findMany({
+        const accounts = await prisma.accounts.findMany({
             where: whereClause,
             include: includeClause,
             orderBy: [
-                { system: { name: 'asc' } },
-                { accountIdInSystem: 'asc' }
+                { name_account: 'asc' },       // Ordena por Nome
+                { id_in_system_account: 'asc' } // Desempate por Login
             ]
         });
 
-        const formattedAccounts = accounts.map(formatAccountProfiles);
+        // Formata para remover a camada 'assignment' e entregar 'profiles' direto
+        const formattedAccounts = accounts.map(formatAccountResponse);
         return res.status(200).json(formattedAccounts);
 
     } catch (error) {
@@ -92,12 +105,16 @@ const getAccountById = async (req, res) => {
     }
 
     try {
-        const account = await prisma.account.findUnique({
+        const account = await prisma.accounts.findUnique({
             where: { id: accountId },
             include: {
-                identity: { select: { id: true, name: true, email: true, cpf: true } },
-                system: { select: { id: true, name: true, type: true } },
-                profiles: { include: { profile: { select: { id: true, name: true } } } }
+                identity: { select: { id: true, name_hr: true, email_hr: true, cpf_hr: true } },
+                system: { select: { id: true, name_system: true } },
+                assignments: {
+                    include: {
+                         resource: { select: { id: true, name_resource: true } }
+                    }
+                }
             }
         });
 
@@ -105,7 +122,7 @@ const getAccountById = async (req, res) => {
             return res.status(404).json({ message: "Conta não encontrada." });
         }
 
-        const formattedAccount = formatAccountProfiles(account);
+        const formattedAccount = formatAccountResponse(account);
         return res.status(200).json(formattedAccount);
 
     } catch (error) {
@@ -116,11 +133,12 @@ const getAccountById = async (req, res) => {
 
 /**
  * @route   PATCH /accounts/:id
- * @desc    Atualiza dados de uma conta.
+ * @desc    Atualiza dados de uma conta e seus recursos (perfis).
  * @access  Private
  */
 const updateAccount = async (req, res) => {
     const accountId = parseInt(req.params.id, 10);
+    // Mapeando nomes do body para nomes do schema
     const { name, email, status, userType, extraData, profileIds } = req.body;
 
     if (isNaN(accountId)) {
@@ -128,61 +146,71 @@ const updateAccount = async (req, res) => {
     }
 
     const dataToUpdate = {};
-    if (name !== undefined) dataToUpdate.name = name;
-    if (email !== undefined) dataToUpdate.email = email;
-    if (status !== undefined) dataToUpdate.status = status;
-    if (userType !== undefined) dataToUpdate.userType = userType;
-    if (extraData !== undefined) dataToUpdate.extraData = extraData;
+    if (name !== undefined) dataToUpdate.name_account = name;
+    if (email !== undefined) dataToUpdate.email_account = email;
+    if (status !== undefined) dataToUpdate.status_account = status;
+    if (userType !== undefined) dataToUpdate.user_type_account = userType;
+    if (extraData !== undefined) dataToUpdate.extra_data_account = extraData;
 
     if (Object.keys(dataToUpdate).length === 0 && profileIds === undefined) {
          return res.status(400).json({ message: "Nenhum dado fornecido para atualização." });
     }
 
      if (profileIds !== undefined && !Array.isArray(profileIds)) {
-         return res.status(400).json({ message: "profileIds deve ser um array de números." });
+         return res.status(400).json({ message: "profileIds deve ser um array de IDs de Recursos." });
      }
-     const profileIdsInt = profileIds?.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+     const resourceIdsInt = profileIds?.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
 
 
     try {
         const updatedAccount = await prisma.$transaction(async (tx) => {
             let account;
+            
+            // 1. Atualiza dados básicos da conta
             if (Object.keys(dataToUpdate).length > 0) {
-                 account = await tx.account.update({
+                 account = await tx.accounts.update({
                     where: { id: accountId },
                     data: dataToUpdate,
                 });
              } else {
-                 account = await tx.account.findUnique({ where: { id: accountId } });
+                 // Apenas verifica se existe
+                 account = await tx.accounts.findUnique({ where: { id: accountId } });
              }
 
             if (!account) {
                  throw new Error("Conta não encontrada.");
              }
 
-            if (profileIdsInt !== undefined) {
-                await tx.accountProfile.deleteMany({
+            // 2. Atualiza Vínculos de Recursos (Assignments)
+            if (resourceIdsInt !== undefined) {
+                // Remove todos os vínculos atuais
+                await tx.assignment.deleteMany({
                     where: { accountId: accountId }
                 });
 
-                if (profileIdsInt.length > 0) {
-                    const newProfileLinks = profileIdsInt.map(pId => ({
+                // Cria os novos vínculos
+                if (resourceIdsInt.length > 0) {
+                    const newAssignments = resourceIdsInt.map(resId => ({
                         accountId: accountId,
-                        profileId: pId,
+                        resourceId: resId,
                     }));
-                    await tx.accountProfile.createMany({
-                        data: newProfileLinks,
+                    
+                    await tx.assignment.createMany({
+                        data: newAssignments,
                         skipDuplicates: true
                     });
                 }
             }
 
-            return await tx.account.findUnique({
+            // 3. Retorna objeto completo
+            return await tx.accounts.findUnique({
                  where: { id: accountId },
                  include: {
-                     identity: { select: { id: true, name: true, email: true, cpf: true } },
-                     system: { select: { id: true, name: true, type: true } },
-                     profiles: { include: { profile: { select: { id: true, name: true } } } }
+                     identity: { select: { id: true, name_hr: true } },
+                     system: { select: { id: true, name_system: true } },
+                     assignments: {
+                         include: { resource: { select: { id: true, name_resource: true } } }
+                     }
                  }
              });
         });
@@ -191,7 +219,7 @@ const updateAccount = async (req, res) => {
            return res.status(404).json({ message: "Conta não encontrada após atualização." });
         }
 
-        const formattedAccount = formatAccountProfiles(updatedAccount);
+        const formattedAccount = formatAccountResponse(updatedAccount);
         return res.status(200).json(formattedAccount);
 
     } catch (error) {
@@ -218,7 +246,8 @@ const deleteAccount = async (req, res) => {
     }
 
     try {
-        const deleteResult = await prisma.account.deleteMany({
+        // O Cascade no schema garante que Assignments sejam deletados juntos
+        const deleteResult = await prisma.accounts.deleteMany({
             where: { id: accountId }
         });
 
@@ -238,7 +267,7 @@ const deleteAccount = async (req, res) => {
 };
 
 
-// --- INÍCIO DA ADIÇÃO: Rota DELETE em massa por systemId ---
+// --- Rota DELETE em massa por systemId ---
 /**
  * @route   DELETE /accounts
  * @desc    Deleta TODAS as contas de um sistema específico.
@@ -252,17 +281,11 @@ const deleteAccountsBySystem = async (req, res) => {
     if (isNaN(systemIdInt)) {
         return res.status(400).json({ message: "Parâmetro 'systemId' é obrigatório e deve ser um número." });
     }
-    
-    // Opcional: Verificar se o sistema é 'RH' (pelo ID) se houver um ID fixo para o RH na tabela System
-    // const rhSystem = await prisma.system.findUnique({ where: { name: 'RH' }});
-    // if (rhSystem && systemIdInt === rhSystem.id) {
-    //    return res.status(403).json({ message: "Contas do RH (Identidades) não podem ser limpas por esta rota." });
-    // }
 
     try {
         // Deleta todas as contas associadas ao systemId
-        // O cascade delete no schema deve cuidar de AccountProfile
-        const deleteResult = await prisma.account.deleteMany({
+        // O cascade delete no schema cuida de Assignment e AccountDivergenceException
+        const deleteResult = await prisma.accounts.deleteMany({
             where: {
                 systemId: systemIdInt
             }
@@ -277,15 +300,13 @@ const deleteAccountsBySystem = async (req, res) => {
         return res.status(500).json({ message: "Erro interno do servidor ao limpar contas." });
     }
 };
-// --- FIM DA ADIÇÃO ---
 
 
 // --- Definição das Rotas ---
 router.get( "/", passport.authenticate("jwt", { session: false }), getAccounts );
-router.delete( "/", passport.authenticate("jwt", { session: false }), deleteAccountsBySystem ); // <<< ROTA ADICIONADA
+router.delete( "/", passport.authenticate("jwt", { session: false }), deleteAccountsBySystem );
 router.get( "/:id", passport.authenticate("jwt", { session: false }), getAccountById );
 router.patch( "/:id", passport.authenticate("jwt", { session: false }), updateAccount );
 router.delete( "/:id", passport.authenticate("jwt", { session: false }), deleteAccount );
-
 
 export default router;

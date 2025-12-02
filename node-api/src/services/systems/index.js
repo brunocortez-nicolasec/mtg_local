@@ -1,5 +1,3 @@
-// node-api/src/services/systems/index.js
-
 import express from "express";
 import passport from "passport";
 import { PrismaClient, Prisma } from '@prisma/client';
@@ -114,15 +112,19 @@ const getDataSourceById = async (req, res) => {
  */
 const createDataSource = async (req, res) => {
   
-  // Extraindo todos os campos do body (incluindo DB)
+  // Extraindo todos os campos do body (incluindo DB, CSV e API)
   const { 
     name, origem, databaseType, description, 
     diretorio, // Campo do RH
     systemId, 
     tipo_fonte_contas, diretorio_contas, 
     tipo_fonte_recursos, diretorio_recursos,
-    // Novos campos DB:
-    db_connection_type, db_host, db_port, db_name, db_user, db_password, db_type, db_url, db_schema, db_table
+    // Campos DB:
+    db_connection_type, db_host, db_port, db_name, db_user, db_password, db_type, db_url, db_schema, db_table,
+    // Campos CSV:
+    csv_delimiter, csv_quote,
+    // Campos API (NOVO):
+    api_url, api_method, api_headers, api_body, api_response_path
   } = req.body;
 
   const data = {
@@ -178,6 +180,21 @@ const createDataSource = async (req, res) => {
         db_type: db_type || 'postgres',
         db_url, db_schema, db_table
       };
+      
+      // Objeto de configuração de CSV reutilizável
+      const csvConfig = {
+          csv_delimiter: csv_delimiter || ",",
+          csv_quote: csv_quote || '"'
+      };
+
+      // Objeto de configuração de API reutilizável (NOVO)
+      const apiConfig = {
+          api_url, 
+          api_method: api_method || 'GET', 
+          api_headers, 
+          api_body, 
+          api_response_path
+      };
 
       switch (data.origem_datasource) {
         case "RH":
@@ -185,7 +202,9 @@ const createDataSource = async (req, res) => {
             data: {
               dataSourceId: dataSource.id,
               diretorio_hr: diretorio, 
-              ...dbConfig
+              ...dbConfig,
+              ...csvConfig,
+              ...apiConfig // Salva config API
             }
           });
           break;
@@ -205,19 +224,19 @@ const createDataSource = async (req, res) => {
           let finalSystemId = systemId ? parseInt(systemId, 10) : null;
           
           if (!finalSystemId) {
-             // Verifica se já existe por nome para evitar duplicidade
-             const existingSys = await tx.system.findUnique({ where: { name_system: data.name_datasource } });
-             if (existingSys) {
-                 finalSystemId = existingSys.id;
-             } else {
-                 const newSys = await tx.system.create({
-                     data: {
-                         name_system: data.name_datasource,
-                         description_system: data.description_datasource
-                     }
-                 });
-                 finalSystemId = newSys.id;
-             }
+              // Verifica se já existe por nome para evitar duplicidade
+              const existingSys = await tx.system.findUnique({ where: { name_system: data.name_datasource } });
+              if (existingSys) {
+                  finalSystemId = existingSys.id;
+              } else {
+                  const newSys = await tx.system.create({
+                      data: {
+                          name_system: data.name_datasource,
+                          description_system: data.description_datasource
+                      }
+                  });
+                  finalSystemId = newSys.id;
+              }
           }
 
           await tx.systemConfig.create({
@@ -228,7 +247,9 @@ const createDataSource = async (req, res) => {
               diretorio_contas: diretorio_contas, 
               tipo_fonte_recursos: tipo_fonte_recursos,
               diretorio_recursos: diretorio_recursos,
-              ...dbConfig
+              ...dbConfig,
+              ...csvConfig,
+              ...apiConfig // Salva config API
             }
           });
           break;
@@ -280,8 +301,12 @@ const updateDataSource = async (req, res) => {
     systemId, 
     tipo_fonte_contas, diretorio_contas, 
     tipo_fonte_recursos, diretorio_recursos,
-    // Novos campos DB
-    db_connection_type, db_host, db_port, db_name, db_user, db_password, db_type, db_url, db_schema, db_table
+    // Campos DB
+    db_connection_type, db_host, db_port, db_name, db_user, db_password, db_type, db_url, db_schema, db_table,
+    // Campos CSV
+    csv_delimiter, csv_quote,
+    // Campos API (NOVO)
+    api_url, api_method, api_headers, api_body, api_response_path
   } = req.body;
 
   const data = {
@@ -335,18 +360,36 @@ const updateDataSource = async (req, res) => {
         db_type: db_type || 'postgres', db_url, db_schema, db_table
       };
 
+      const csvConfig = {
+          csv_delimiter: csv_delimiter || ",",
+          csv_quote: csv_quote || '"'
+      };
+
+      // Configuração API (NOVO)
+      const apiConfig = {
+          api_url, 
+          api_method: api_method || 'GET', 
+          api_headers, 
+          api_body, 
+          api_response_path
+      };
+
       switch (data.origem_datasource) {
         case "RH":
           await tx.hRConfig.upsert({
             where: { dataSourceId: dataSourceId },
             update: { 
                 diretorio_hr: diretorio,
-                ...dbConfig
+                ...dbConfig,
+                ...csvConfig,
+                ...apiConfig // Atualiza API
             },
             create: { 
                 dataSourceId: dataSourceId, 
                 diretorio_hr: diretorio,
-                ...dbConfig
+                ...dbConfig,
+                ...csvConfig,
+                ...apiConfig // Salva API
             }
           });
           break;
@@ -362,7 +405,9 @@ const updateDataSource = async (req, res) => {
               diretorio_contas: diretorio_contas,     
               tipo_fonte_recursos: tipo_fonte_recursos,
               diretorio_recursos: diretorio_recursos,
-              ...dbConfig  
+              ...dbConfig,
+              ...csvConfig,
+              ...apiConfig // Atualiza API
             },
             create: {
               dataSourceId: dataSourceId,
@@ -371,7 +416,9 @@ const updateDataSource = async (req, res) => {
               diretorio_contas: diretorio_contas,     
               tipo_fonte_recursos: tipo_fonte_recursos,
               diretorio_recursos: diretorio_recursos,
-              ...dbConfig  
+              ...dbConfig,
+              ...csvConfig,
+              ...apiConfig // Salva API
             }
           });
           break;

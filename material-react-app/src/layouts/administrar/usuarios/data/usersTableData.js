@@ -1,7 +1,14 @@
+/* eslint-disable react/prop-types */
+/* eslint-disable react/function-component-definition */
+
 import MDTypography from "components/MDTypography";
 import MDAvatar from "components/MDAvatar";
 import MDBox from "components/MDBox";
 import defaultAvatar from "assets/images/default-avatar.jpg";
+
+// Novos imports para os ícones e tooltip
+import Icon from "@mui/material/Icon";
+import Tooltip from "@mui/material/Tooltip";
 
 function Author({ image, name }) {
   return (
@@ -16,20 +23,42 @@ function Author({ image, name }) {
   );
 }
 
-function Action({ onEdit, onDelete }) {
+function Action({ onEdit, onDelete, onReset }) {
   return (
-    <MDBox>
-      <MDTypography onClick={onEdit} component="a" href="#" variant="caption" color="text" fontWeight="medium" mr={2}>
-        Editar
-      </MDTypography>
-      <MDTypography onClick={onDelete} component="a" href="#" variant="caption" color="error" fontWeight="medium">
-        Deletar
-      </MDTypography>
+    <MDBox display="flex" alignItems="center" justifyContent="center">
+      
+      {/* Botão RESET - Cor Warning (Laranja/Amarelo) */}
+      <Tooltip title="Resetar Senha" placement="top">
+        <MDBox mx={1} sx={{ cursor: "pointer" }}>
+           <MDTypography variant="body2" color="warning" onClick={onReset}>
+              <Icon fontSize="small">lock_reset</Icon>
+           </MDTypography>
+        </MDBox>
+      </Tooltip>
+
+      {/* Botão EDITAR - Cor Info (Azul) */}
+      <Tooltip title="Editar Usuário" placement="top">
+        <MDBox mx={1} sx={{ cursor: "pointer" }}>
+           <MDTypography variant="body2" color="info" onClick={onEdit}>
+              <Icon fontSize="small">edit</Icon>
+           </MDTypography>
+        </MDBox>
+      </Tooltip>
+
+      {/* Botão DELETAR - Cor Error (Vermelho) */}
+      <Tooltip title="Deletar Usuário" placement="top">
+        <MDBox mx={1} sx={{ cursor: "pointer" }}>
+           <MDTypography variant="body2" color="error" onClick={onDelete}>
+              <Icon fontSize="small">delete</Icon>
+           </MDTypography>
+        </MDBox>
+      </Tooltip>
+
     </MDBox>
   );
 }
 
-export default function data(users, handleEdit, handleDelete) {
+export default function data(users, handleEdit, handleDelete, handleReset) {
   const columns = [
     { Header: "usuário", accessor: "user", width: "30%", align: "left" },
     { Header: "email", accessor: "email", align: "left" },
@@ -39,12 +68,9 @@ export default function data(users, handleEdit, handleDelete) {
     { Header: "ação", accessor: "action", align: "center" },
   ];
 
-  // --- BLINDAGEM: (users || []) ---
-  // Garante que mesmo se users for nulo aqui, o map não quebra
   const rows = (users || []).map(user => ({
     user: <Author image={user.profile_image} name={user.name} />,
     email: <MDTypography variant="caption">{user.email}</MDTypography>,
-    // Tratamento para objeto aninhado (Prisma)
     role: <MDTypography variant="caption">{user.profile?.name || "Sem função"}</MDTypography>,
     package: (
       <MDTypography variant="caption" color="text" fontWeight="medium">
@@ -56,7 +82,13 @@ export default function data(users, handleEdit, handleDelete) {
         {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "N/A"}
       </MDTypography>
     ),
-    action: <Action onEdit={() => handleEdit(user)} onDelete={() => handleDelete(user.id)} />,
+    action: (
+      <Action 
+        onEdit={() => handleEdit(user)} 
+        onDelete={() => handleDelete(user.id)}
+        onReset={() => handleReset(user)} 
+      />
+    ),
   }));
 
   return { columns, rows };

@@ -25,8 +25,10 @@ import resourcesRoutes from "./services/resources/index.js";
 import exportsRoutes from "./services/exports/index.js";
 
 import passport from "passport"; 
+// --- IMPORTAÇÕES DE TESTE DE CONEXÃO ---
 import { testCsvConnection } from "./services/datasources/testCsv.js";
 import { testDbConnection } from "./services/datasources/testDb.js"; 
+import { testApiConnection } from "./services/datasources/testApi.js";
 
 import path from "path";
 import * as fs from "fs";
@@ -46,7 +48,6 @@ const HOSTNAME_URL = process.env.API_HOSTNAME_URL;
 if (!CLIENT_URL || !API_URL) {
   console.error("❌ ERRO CRÍTICO: Variáveis de ambiente APP_URL_CLIENT ou API_PUBLIC_URL não definidas.");
   console.error("Verifique o arquivo .env no diretório node-api.");
-  // Em produção, você poderia dar um process.exit(1) aqui.
 } else {
   console.log("✅ Configuração de Ambiente Carregada:");
   console.log(`   Client: ${CLIENT_URL}`);
@@ -59,12 +60,11 @@ const corsOptions = {
       CLIENT_URL,
       API_URL,
       HOSTNAME_URL,
-      `${CLIENT_URL}/`, // Garante que a barra no final também seja aceita
-      `${HOSTNAME_URL}/`, // Garante que a barra no final também seja aceita
+      `${CLIENT_URL}/`, 
+      `${HOSTNAME_URL}/`, 
       `${API_URL}/`
     ];
 
-    // Permite requisições sem 'origin' (como Postman) ou se a origem estiver na lista permitida pelo .env
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -86,7 +86,7 @@ app.get("/", function (req, res) {
   res.sendFile(path.join(__dirname, "/src/landing/index.html"));
 });
 
-// Rotas
+// Rotas da Aplicação
 app.use("/", authRoutes);
 app.use("/me", meRoutes);
 app.use("/users", usersRoutes);
@@ -109,15 +109,23 @@ app.use("/systems-catalog", systemsCatalogRoutes);
 app.use("/resources", resourcesRoutes);
 app.use("/exports", exportsRoutes);
 
+// --- ROTAS DE TESTE DE CONEXÃO ---
 app.post(
   "/datasources/test-csv",
   passport.authenticate("jwt", { session: false }),
   testCsvConnection
 );
+
 app.post(
   "/datasources/test-db",
   passport.authenticate("jwt", { session: false }),
   testDbConnection
+);
+
+app.post(
+  "/datasources/test-api",
+  passport.authenticate("jwt", { session: false }),
+  testApiConnection
 );
 
 app.listen(PORT, () => console.log(`Server listening to port ${PORT}`));

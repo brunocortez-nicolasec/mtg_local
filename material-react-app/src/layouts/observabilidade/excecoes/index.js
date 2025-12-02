@@ -36,26 +36,31 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
 
 
-// --- COMPONENTE HELPER PADRONIZADO ---
+// --- COMPONENTE HELPER PADRONIZADO (CORRIGIDO) ---
 function DetailItem({ icon, label, value, children, darkMode }) {
-  const valueColor = darkMode ? "white" : "text.secondary";
+  // CORREÇÃO: Usamos "text" (que se adapta) ou forçamos "white" no dark mode explicitamente
+  // Mas para garantir igual ao lado direito, vamos usar a cor do texto padrão do tema dark
+  const textColor = darkMode ? "white" : "text";
 
   return (
     <MDBox display="flex" alignItems="center" mb={1.5} lineHeight={1}>
       <Icon color="secondary" fontSize="small" sx={{ mr: 1.5 }}>
         {icon}
       </Icon>
-      <MDTypography variant="button" fontWeight="bold" color="text">
+      
+      {/* Rótulo (ex: "Justificativa:") */}
+      <MDTypography variant="button" fontWeight="bold" color={textColor} sx={{ opacity: 0.9 }}>
         {label}:&nbsp;
       </MDTypography>
 
+      {/* Valor (ex: "d") */}
       {value != null && value !== '' && (
-        <MDTypography variant="button" fontWeight="regular" color={valueColor}>
+        <MDTypography variant="button" fontWeight="regular" color={textColor}>
           {value}
         </MDTypography>
       )}
         {!value && value !== 0 && value !== false && !children && ( 
-          <MDTypography variant="button" fontWeight="regular" color={valueColor}>
+          <MDTypography variant="button" fontWeight="regular" color={textColor} sx={{ opacity: 0.6 }}>
             N/A
           </MDTypography>
         )}
@@ -84,7 +89,7 @@ const ExceptionDetailsModal = ({ open, onClose, isLoading, details, getDivergenc
 
   const renderDetailsContent = () => {
     if (!details) {
-        return <MDTypography>Não foi possível carregar os detalhes.</MDTypography>;
+        return <MDTypography color={darkMode ? "white" : "text"}>Não foi possível carregar os detalhes.</MDTypography>;
     }
 
     const isAccountException = details.type === 'Account';
@@ -92,6 +97,13 @@ const ExceptionDetailsModal = ({ open, onClose, isLoading, details, getDivergenc
 
     const identityData = isIdentityException ? details.identity : details.account?.identity;
     const accountData = isAccountException ? details.account : null;
+    
+    // Título das seções agora respeita darkMode
+    const SectionTitle = ({ children }) => (
+        <MDTypography variant="h6" fontWeight="medium" color={darkMode ? "white" : "dark"} sx={{ mb: 2 }}>
+            {children}
+        </MDTypography>
+    );
 
     const renderDivergenceSpecifics = () => {
         if (!details.divergenceDetails) return <DetailItem icon="help_outline" label="Detalhes" value="Nenhuma informação adicional." darkMode={darkMode} />;
@@ -133,9 +145,9 @@ const ExceptionDetailsModal = ({ open, onClose, isLoading, details, getDivergenc
             case "ACCESS_NOT_GRANTED":
               return <DetailItem icon="link_off" label={`Acesso esperado em`} value={targetSystem} darkMode={darkMode} />;
             case "ORPHAN_ACCOUNT":
-               return <DetailItem icon="no_accounts" label={`Conta Órfã em`} value={appData?.system?.name_system || 'Sistema desconhecido'} darkMode={darkMode} />; 
+                return <DetailItem icon="no_accounts" label={`Conta Órfã em`} value={appData?.system?.name_system || 'Sistema desconhecido'} darkMode={darkMode} />; 
             case "DORMANT_ADMIN":
-               return <DetailItem icon="timer_off" label={`Admin dormente em`} value={appData?.system?.name_system || 'Sistema desconhecido'} darkMode={darkMode} />; 
+                return <DetailItem icon="timer_off" label={`Admin dormente em`} value={appData?.system?.name_system || 'Sistema desconhecido'} darkMode={darkMode} />; 
             default:
               return <DetailItem icon="help_outline" label="Detalhes" value="Nenhuma informação adicional." darkMode={darkMode} />;
         }
@@ -143,11 +155,9 @@ const ExceptionDetailsModal = ({ open, onClose, isLoading, details, getDivergenc
 
     const renderIdentityDetails = () => (
         <MDBox>
-            <MDTypography variant="h6" fontWeight="medium" sx={{ mb: 2 }}>
-                {isIdentityException ? "Identidade (RH)" : "Identidade Vinculada (RH)"}
-            </MDTypography>
+            <SectionTitle>{isIdentityException ? "Identidade (RH)" : "Identidade Vinculada (RH)"}</SectionTitle>
             {!identityData ? (
-                <MDTypography variant="caption" color="textSecondary">Esta conta (Órfã) não está vinculada a nenhuma identidade do RH.</MDTypography>
+                <MDTypography variant="caption" color="textSecondary" sx={{ color: darkMode ? "rgba(255,255,255,0.7)" : "inherit" }}>Esta conta (Órfã) não está vinculada a nenhuma identidade do RH.</MDTypography>
             ) : (
                  <>
                    <DetailItem icon="person_outline" label="Nome" value={identityData?.name_hr} darkMode={darkMode} />
@@ -162,10 +172,10 @@ const ExceptionDetailsModal = ({ open, onClose, isLoading, details, getDivergenc
     );
 
     const renderAccountDetails = () => {
-        if (!accountData) return <MDTypography variant="caption">Dados da conta indisponíveis.</MDTypography>;
+        if (!accountData) return <MDTypography variant="caption" color={darkMode ? "white" : "text"}>Dados da conta indisponíveis.</MDTypography>;
          return (
             <MDBox>
-              <MDTypography variant="h6" fontWeight="medium" sx={{ mb: 2 }}>Conta (Sistema)</MDTypography>
+              <SectionTitle>Conta (Sistema)</SectionTitle>
               <DetailItem icon="computer" label="Sistema" value={accountData?.system?.name_system} darkMode={darkMode} />
               <DetailItem icon="vpn_key" label="ID no Sistema" value={accountData?.id_in_system_account} darkMode={darkMode} />
               <DetailItem icon="person_outline" label="Nome na Conta" value={accountData?.name_account} darkMode={darkMode} />
@@ -186,7 +196,7 @@ const ExceptionDetailsModal = ({ open, onClose, isLoading, details, getDivergenc
                 <Grid item xs={12} md={6}>
                     {isAccountException ? renderAccountDetails() : (
                         <MDBox>
-                            <MDTypography variant="h6" fontWeight="medium" sx={{ mb: 2 }}>Divergência Ignorada</MDTypography>
+                            <SectionTitle>Divergência Ignorada</SectionTitle>
                             <DetailItem icon="warning" label="Tipo" value={getDivergenceLabel(details.divergenceCode)} darkMode={darkMode} />
                             {renderDivergenceSpecifics()}
                         </MDBox>
@@ -196,19 +206,19 @@ const ExceptionDetailsModal = ({ open, onClose, isLoading, details, getDivergenc
 
             {isAccountException && (
                 <>
-                    <Divider sx={{ my: 2 }} />
+                    <Divider sx={{ my: 2, backgroundColor: darkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)" }} />
                     <MDBox>
-                        <MDTypography variant="h6" fontWeight="medium" sx={{ mb: 2 }}>Divergência Ignorada (Detalhes)</MDTypography>
+                        <SectionTitle>Divergência Ignorada (Detalhes)</SectionTitle>
                         <DetailItem icon="warning" label="Tipo" value={getDivergenceLabel(details.divergenceCode)} darkMode={darkMode} />
                         {renderDivergenceSpecifics()}
                     </MDBox>
                 </>
             )}
 
-            <Divider sx={{ my: 2 }} />
+            <Divider sx={{ my: 2, backgroundColor: darkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)" }} />
 
             <MDBox>
-                <MDTypography variant="h6" fontWeight="medium" sx={{ mb: 2 }}>Detalhes da Aprovação</MDTypography>
+                <SectionTitle>Detalhes da Aprovação</SectionTitle>
                 <Grid container spacing={3}>
                     <Grid item xs={12} md={6}>
                         <DetailItem icon="how_to_reg" label="Aprovado por" value={details.user?.name} darkMode={darkMode} />
@@ -227,7 +237,7 @@ const ExceptionDetailsModal = ({ open, onClose, isLoading, details, getDivergenc
     <Modal open={open} onClose={onClose} sx={{ display: "grid", placeItems: "center" }}>
       <Card sx={{ width: "90%", maxWidth: "800px", maxHeight: "90vh", overflowY: "auto" }}>
         <MDBox p={2} display="flex" justifyContent="space-between" alignItems="center">
-          <MDTypography variant="h5">Detalhes da Exceção</MDTypography>
+          <MDTypography variant="h5" color={darkMode ? "white" : "dark"}>Detalhes da Exceção</MDTypography>
           <Icon
             sx={({ typography: { size }, palette: { dark, white } }) => ({
                 fontSize: `${size.lg} !important`,
@@ -280,7 +290,6 @@ function GerenciarExcecoes() {
     const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
     const [detailsModalState, setDetailsModalState] = useState({ isOpen: false, isLoading: false, data: null });
 
-    // --- CORREÇÃO: URL CORRETA ---
     const API_URL = process.env.REACT_APP_API_URL;
 
     const api = axios.create({
@@ -306,12 +315,11 @@ function GerenciarExcecoes() {
         setIsLoading(true);
         try {
             const response = await api.get('/divergences/exceptions');
-            // --- Blindagem de Array ---
             const data = response.data;
             setExceptions(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error("Erro ao buscar exceções:", error);
-            setExceptions([]); // Garante estado limpo
+            setExceptions([]); 
             setNotification({ open: true, color: "error", title: "Erro de Rede", content: "Não foi possível carregar as exceções." });
         } finally {
             setIsLoading(false);
@@ -565,9 +573,8 @@ function GerenciarExcecoes() {
                 </MDButton>
             )
         },
-    ], [exceptions, getDivergenceLabel]); // Dependências atualizadas
+    ], [exceptions, getDivergenceLabel]); 
 
-    // Rows blindadas
     const rows = useMemo(() => Array.isArray(exceptions) ? exceptions : [], [exceptions]);
 
     return (

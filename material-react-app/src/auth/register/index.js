@@ -88,7 +88,7 @@ function Register() {
       }
 
       // --- CORREÇÃO AQUI: Força a URL correta para buscar dados do usuário ---
-      const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8080";
+      const API_URL = process.env.REACT_APP_API_URL;
 
       const userResponse = await axios.get(`${API_URL}/me`, {
         headers: { Authorization: `Bearer ${token}` },

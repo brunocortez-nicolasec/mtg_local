@@ -8,10 +8,6 @@ const findSingleCsvInDir = async (directoryPath) => {
   const basePath = process.cwd(); 
   
   // LIMPEZA BLINDADA: 
-  // 1. Remove aspas que possam vir do input
-  // 2. Remove espaços em branco
-  // 3. Remove barras (/) ou pontos (.) do início para evitar que o Node tente ir para a raiz do sistema
-  // Ex: "/public/rh" vira "public/rh"
   const cleanPath = directoryPath.replace(/["']/g, "").trim().replace(/^[\.\/]+/, "");
   
   // path.join é mais seguro que resolve aqui, pois concatena estritamente
@@ -35,7 +31,6 @@ const findSingleCsvInDir = async (directoryPath) => {
         const rootContent = await fs.promises.readdir(basePath);
         console.error(`[CSV DEBUG] Conteúdo da raiz (${basePath}): [${rootContent.join(', ')}]`);
         
-        // Se a busca for dentro de public, tenta listar public
         if (cleanPath.startsWith('public')) {
            const publicPath = path.join(basePath, 'public');
            const publicContent = await fs.promises.readdir(publicPath).catch(() => ["(Erro ao ler public)"]);
@@ -69,7 +64,8 @@ const findSingleCsvInDir = async (directoryPath) => {
 
 
 export const testCsvConnection = async (req, res) => {
-  const { diretorio } = req.body;
+  // --- ALTERAÇÃO: Recebe delimitador e aspas (com valores padrão) ---
+  const { diretorio, delimiter = ",", quote = '"' } = req.body;
 
   if (!diretorio) {
     return res.status(400).json({ message: "O campo 'diretório' é obrigatório." });
@@ -78,6 +74,7 @@ export const testCsvConnection = async (req, res) => {
   try {
     const csvFilePath = await findSingleCsvInDir(diretorio);
     console.log(`[CSV TEST] Sucesso! Lendo arquivo: ${csvFilePath}`);
+    console.log(`[CSV TEST] Configuração: Delimitador [${delimiter}] | Aspas [${quote}]`);
 
     const fileStream = fs.createReadStream(csvFilePath);
     const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
@@ -91,7 +88,15 @@ export const testCsvConnection = async (req, res) => {
     fileStream.close();
 
     if (firstLine) {
-      return res.status(200).json({ success: true, header: firstLine });
+      // --- ALTERAÇÃO: Tenta detectar colunas baseado no delimitador escolhido ---
+      // Isso ajuda o frontend a mostrar "Encontrado (X colunas)" para o usuário validar
+      const columns = firstLine.split(delimiter);
+
+      return res.status(200).json({ 
+          success: true, 
+          header: firstLine,
+          detectedColumns: columns.length 
+      });
     } else {
       return res.status(400).json({ message: "O arquivo CSV está vazio." });
     }

@@ -12,7 +12,8 @@ const cleanText = (text) => text?.trim().toLowerCase();
 const cleanCpf = (cpf) => cpf?.replace(/[^\d]/g, '');
 
 const getLiveFeedData = async (req, res) => {
-    const { system } = req.query; // Pega 'system' da query string (ex: "SAP", "RH", ou "Geral")
+    // --- ALTERAÇÃO 1: Receber os filtros da query string ---
+    const { system, userType, status, divergenceType } = req.query; 
     const isGeneral = !system || system.toLowerCase() === 'geral';
 
     const userIdInt = parseInt(req.user.id, 10);
@@ -68,7 +69,7 @@ const getLiveFeedData = async (req, res) => {
                 // Se for RH, não busca contas
             } else {
                 systemRecord = await tx.system.findUnique({
-                    where: { name_system: system }, // Corrigido de 'name'
+                    where: { name_system: system }, 
                     select: { id: true }
                 });
                 if (!systemRecord) {
@@ -103,7 +104,7 @@ const getLiveFeedData = async (req, res) => {
                 id_in_system_account: id.identity_id_hr,
                 name_account: id.name_hr,
                 email_account: id.email_hr,
-                cpf_account: id.cpf_hr, // <-- ADICIONADO
+                cpf_account: id.cpf_hr,
                 status_account: id.status_hr,
                 user_type_account: id.user_type_hr,
                 extra_data_account: id.extra_data_hr,
@@ -220,9 +221,7 @@ const getLiveFeedData = async (req, res) => {
                 identityId: account.identityId,
                 name: account.name_account,
                 email: account.email_account,
-// ======================= INÍCIO DA ALTERAÇÃO =======================
-                cpf_account: account.cpf_account, // <-- ADICIONADO AQUI
-// ======================== FIM DA ALTERAÇÃO =========================
+                cpf_account: account.cpf_account,
                 userType: rhUser?.user_type_hr || 'N/A', 
                 perfil: perfilString,
                 rh_status: rhUser?.status_hr || (isOrphan ? 'Não encontrado' : 'N/A'),
@@ -303,7 +302,7 @@ const getLiveFeedData = async (req, res) => {
                       }
                  });
             }
-        } else if (systemRecord) { // <-- USA O systemRecord (se não for "RH")
+        } else if (systemRecord) {
              activeRhIdentities.forEach(rhUser => {
                 const hasAccountInSystem = identitySystemMap.get(rhUser.id)?.has(systemRecord.id);
                  if (!hasAccountInSystem) { 
@@ -315,20 +314,49 @@ const getLiveFeedData = async (req, res) => {
              });
         }
         
-        // --- Etapa 6: Combinar os resultados ---
-        const combinedResult = [...finalData, ...missingAccessUsers];
+        // --- Etapa 6: Combinar e Filtrar ---
+        // ALTERAÇÃO 2: Usar 'let' para permitir reatribuição durante filtragem
+        let combinedResult = [...finalData, ...missingAccessUsers];
+
+        // --- ALTERAÇÃO 3: Aplicação dos Filtros ---
+        
+        // 1. Filtro por Tipo de Usuário (userType)
+        if (userType) {
+            if (userType === 'Não categorizado') {
+                // Procura por nulo, indefinido ou string vazia
+                combinedResult = combinedResult.filter(item => !item.userType || item.userType.trim() === '');
+            } else {
+                // Procura pelo valor exato (case insensitive)
+                combinedResult = combinedResult.filter(item => item.userType && item.userType.toLowerCase() === userType.toLowerCase());
+            }
+        }
+
+        // 2. Filtro por Status (rh_status ou app_status)
+        if (status) {
+            combinedResult = combinedResult.filter(item => 
+                (item.rh_status && item.rh_status.toLowerCase() === status.toLowerCase()) ||
+                (item.app_status && item.app_status.toLowerCase() === status.toLowerCase())
+            );
+        }
+
+        // 3. Filtro por Tipo de Divergência
+        if (divergenceType) {
+            combinedResult = combinedResult.filter(item => 
+                item.divergenceDetails.some(d => d.code === divergenceType)
+            );
+        }
         
         return combinedResult;
+
       }); // Fim da transação
       
       return res.status(200).json(combinedData);
 
     } catch (error) {
-        console.error(`Erro ao buscar dados do Live Feed:`, error);
-        return res.status(500).json({ message: "Erro interno do servidor." });
+        console.error(`Erro Live Feed:`, error);
+        return res.status(500).json({ message: "Erro interno." });
     }
 };
-// ======================== FIM DA REFATORAÇÃO (Prisma Schema) =========================
 
 // Define a rota GET para o Live Feed
 router.get(

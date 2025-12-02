@@ -278,7 +278,6 @@ function SodModal({ open, onClose, onRefresh, showSnackbar, token, ruleToEdit,
                 onChange={(event, newValue) => handleFormChange("system", newValue)}
                 isOptionEqualToValue={(option, value) => option.id === value?.id}
                 disabled={isEditing}
-                ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                 renderInput={(params) => <MDInput {...params} label="Sistema Alvo *" required variant="outlined" />}
               />
               {isEditing && currentRule.system && (
@@ -295,7 +294,6 @@ function SodModal({ open, onClose, onRefresh, showSnackbar, token, ruleToEdit,
                 isOptionEqualToValue={(option, value) => option.id === value?.id}
                 disableClearable
                 disabled={!currentRule.system}
-                ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                 renderInput={(params) => <MDInput {...params} label="Tipo de Regra *" required variant="outlined" />}
               />
                {currentRule.system?.id === null && (

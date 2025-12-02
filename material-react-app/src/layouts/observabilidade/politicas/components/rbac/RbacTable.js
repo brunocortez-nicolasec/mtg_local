@@ -110,7 +110,7 @@ function RbacTable({ loading, rules, resources, attributes, onEdit, onDelete }) 
         <MDBox display="flex" justifyContent="center"> 
           <Tooltip title="Editar">
             <IconButton onClick={() => onEdit(original)} size="small"> 
-              <Icon>edit</Icon>
+              <Icon color="info">edit</Icon>
             </IconButton>
           </Tooltip>
           <Tooltip title="Deletar">

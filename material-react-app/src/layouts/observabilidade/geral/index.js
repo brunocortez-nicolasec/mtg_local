@@ -73,10 +73,10 @@ const ModalContent = React.forwardRef(({ title, data, onClose, darkMode }, ref) 
     </Box>
 ));
 ModalContent.propTypes = {
-  title: PropTypes.string.isRequired,
-  data: PropTypes.object.isRequired,
-  onClose: PropTypes.func.isRequired,
-  darkMode: PropTypes.bool,
+    title: PropTypes.string.isRequired,
+    data: PropTypes.object.isRequired,
+    onClose: PropTypes.func.isRequired,
+    darkMode: PropTypes.bool,
 };
 ModalContent.defaultProps = { darkMode: false };
 ModalContent.displayName = 'ModalContent';
@@ -180,18 +180,18 @@ const DrillDownModal = React.forwardRef(({ title, data, isLoading, onIgnore, onI
 });
 
 DrillDownModal.propTypes = {
-  title: PropTypes.string.isRequired,
-  data: PropTypes.array.isRequired,
-  isLoading: PropTypes.bool.isRequired,
-  onIgnore: PropTypes.func.isRequired,
-  onIgnoreAll: PropTypes.func.isRequired,
-  onClose: PropTypes.func.isRequired,
-  darkMode: PropTypes.bool,
-  divergenceCode: PropTypes.string,
+    title: PropTypes.string.isRequired,
+    data: PropTypes.array.isRequired,
+    isLoading: PropTypes.bool.isRequired,
+    onIgnore: PropTypes.func.isRequired,
+    onIgnoreAll: PropTypes.func.isRequired,
+    onClose: PropTypes.func.isRequired,
+    darkMode: PropTypes.bool,
+    divergenceCode: PropTypes.string,
 };
 DrillDownModal.defaultProps = {
-  darkMode: false,
-  divergenceCode: '',
+    darkMode: false,
+    divergenceCode: '',
 };
 DrillDownModal.displayName = 'DrillDownModal';
 
@@ -217,9 +217,9 @@ const JustificationModal = ({ open, onClose, onSubmit }) => {
     );
 };
 JustificationModal.propTypes = {
-  open: PropTypes.bool.isRequired,
-  onClose: PropTypes.func.isRequired,
-  onSubmit: PropTypes.func.isRequired,
+    open: PropTypes.bool.isRequired,
+    onClose: PropTypes.func.isRequired,
+    onSubmit: PropTypes.func.isRequired,
 };
 
 
@@ -241,7 +241,6 @@ function VisaoGeral() {
     const [notification, setNotification] = useState({ open: false, color: "info", title: "", content: "" });
     const closeNotification = () => setNotification({ ...notification, open: false });
 
-    // --- CORREÇÃO: URL CORRETA ---
     const API_URL = process.env.REACT_APP_API_URL;
 
     const api = axios.create({
@@ -410,16 +409,25 @@ function VisaoGeral() {
         handleOpenModal();
     };
 
+    // --- CORREÇÃO NA LÓGICA DE FILTRAGEM DO GRÁFICO PIZZA ---
     const handlePieChartClick = (event, elements) => {
         if (!elements || elements.length === 0) return;
         const { index } = elements[0];
         const clickedLabel = displayData.imDisplay.tiposChart.labels[index];
         if (!clickedLabel) return;
     
-        const usersOfType = liveFeedData.filter(item => 
-            (item.userType || 'Não categorizado') === clickedLabel && 
-            (item.app_status !== 'Não encontrado' || item.divergenceCode === 'ACCESS_NOT_GRANTED')
-        );
+        const usersOfType = liveFeedData.filter(item => {
+            // Normaliza o tipo do item para bater com o rótulo do gráfico
+            let itemType = item.userType;
+            
+            // Se for nulo, vazio ou "N/A" (como vem do backend), trata como "Não categorizado"
+            if (!itemType || itemType === 'N/A' || itemType.trim() === '') {
+                itemType = 'Não categorizado';
+            }
+            
+            return itemType === clickedLabel && 
+                   (item.app_status !== 'Não encontrado' || item.divergenceCode === 'ACCESS_NOT_GRANTED');
+        });
     
         setModalContent({
             title: `Detalhes: Tipo de Usuário "${clickedLabel}"`,

@@ -18,8 +18,8 @@ import { useMaterialUIController } from "context";
 function MappingForm({ 
   title, 
   description, 
-  fields, // Array de objetos { key, label, required, description, value }
-  availableColumns, // Array de strings (colunas do CSV ou DB)
+  fields, 
+  availableColumns, 
   onMappingChange, 
   onSave, 
   isSaveDisabled, 
@@ -81,13 +81,12 @@ function MappingForm({
                       onChange={(event, newValue) => {
                         onMappingChange(field.key, newValue);
                       }}
-                      // Filtra opções já selecionadas (exceto a atual)
                       getOptionDisabled={(option) => {
                          const allValues = fields.map(f => f.value).filter(Boolean);
                          return allValues.includes(option) && option !== field.value;
                       }}
                       ListboxProps={{
-                        sx: { backgroundColor: darkMode ? "grey.800" : "white" },
+                        sx: { },
                       }}
                       renderInput={(params) => (
                         <MDInput 
@@ -97,7 +96,10 @@ function MappingForm({
                           helperText={field.description}
                           FormHelperTextProps={{ 
                             sx: { 
-                              color: (theme) => theme.palette.text.secondary,
+                              // --- CORREÇÃO AQUI ---
+                              // Força a cor branca no modo escuro
+                              color: darkMode ? "#ffffff" : (theme) => theme.palette.text.secondary,
+                              opacity: darkMode ? 0.8 : 1, // Um pouco de transparência para ficar elegante
                               fontSize: '0.75rem',
                               marginLeft: 0 
                             } 

@@ -49,7 +49,6 @@ function DynamicConditionFields({
             onChange={(event, newValue) => onChange(event, "requiredProfile", newValue)}
             isOptionEqualToValue={(option, value) => option?.id === value?.id}
             disabled={isDisabled} 
-            ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
             renderInput={(params) => <MDInput {...params} label="Recurso Requerido *" required variant="outlined" />}
           />
         </Grid>
@@ -65,7 +64,6 @@ function DynamicConditionFields({
               onChange={(event, newValue) => onSingleAttrChange("attribute", newValue)}
               isOptionEqualToValue={(option, value) => option?.id === value?.id}
               disabled={isDisabled} 
-              ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
               renderInput={(params) => (
                 <MDInput {...params} label="Atributo Requerido *" required variant="outlined" />
               )}
@@ -81,7 +79,6 @@ function DynamicConditionFields({
               isOptionEqualToValue={(option, value) => option?.id === value?.id}
               disableClearable
               disabled={isDisabled} 
-              ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
               renderInput={(params) => <MDInput {...params} label="Operador *" required variant="outlined" />}
             />
           </Grid>
@@ -111,7 +108,6 @@ function DynamicConditionFields({
               isOptionEqualToValue={(option, value) => option?.id === value?.id}
               disableClearable
               disabled={isDisabled} 
-              ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
               renderInput={(params) => <MDInput {...params} label="Lógica das Condições *" required variant="outlined" />}
             />
           </Grid>
@@ -132,7 +128,6 @@ function DynamicConditionFields({
                   onChange={(event, newValue) => onListChange(index, "attribute", newValue)}
                   isOptionEqualToValue={(option, value) => option?.id === value?.id}
                   disabled={isDisabled} 
-                  ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                   renderInput={(params) => (
                     <MDInput {...params} label={`Atributo ${index + 1} *`} required variant="outlined" />
                   )}
@@ -147,7 +142,6 @@ function DynamicConditionFields({
                   isOptionEqualToValue={(option, value) => option?.id === value?.id}
                   disableClearable
                   disabled={isDisabled} 
-                  ListboxProps={{ sx: { backgroundColor: darkMode ? "grey.800" : "white" } }}
                   renderInput={(params) => <MDInput {...params} label="Operador *" required variant="outlined" />}
                   sx={{ width: { xs: "100%", sm: "calc(25% - 8px)" } }}
                 />

@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 
-// --- CORREÇÃO 1: Configuração correta da URL (Sem localhost fixo) ---
 const API_URL = process.env.REACT_APP_API_URL;
 
 const api = axios.create({
@@ -11,14 +10,12 @@ const api = axios.create({
 });
 
 export function useColumnFetcher(dataSource, mappingTarget) {
-  // Inicializa sempre com array vazio para não quebrar .map() no componente visual
   const [columns, setColumns] = useState([]); 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchColumns = async () => {
-      // Limpa colunas se não houver fonte selecionada
       if (!dataSource) {
         setColumns([]);
         return;
@@ -52,9 +49,14 @@ export function useColumnFetcher(dataSource, mappingTarget) {
              if (dataSource.hrConfig.db_host || dataSource.hrConfig.db_url) {
                  currentType = 'DATABASE';
              }
+             // Se tiver api_url, é API
+             if (dataSource.hrConfig.api_url) {
+                 currentType = 'API';
+             }
         }
 
         const isDatabase = currentType === 'DATABASE';
+        const isApi = currentType === 'API';
         // ==============================================================
 
         // === CENÁRIO 1: BANCO DE DADOS ===
@@ -88,21 +90,48 @@ export function useColumnFetcher(dataSource, mappingTarget) {
                    table: targetTable 
                }, { headers: authHeaders }); 
                
-               // --- CORREÇÃO 2: BLINDAGEM CONTRA CRASH (map is not a function) ---
-               // Garante que só atribuímos se for realmente um Array
                if (response.data.columns && Array.isArray(response.data.columns)) {
                    fetchedCols = response.data.columns;
                } else {
-                   // Se conectar mas não vier array, assume vazio para não quebrar a tela
                    fetchedCols = [];
-                   // Opcional: Lançar erro se quiser avisar o usuário
-                   // throw new Error(`Formato de colunas inválido recebido do banco.`);
                }
            } else {
                throw new Error("Configuração de banco de dados incompleta ou tabela não definida.");
            }
 
-        // === CENÁRIO 2: ARQUIVO CSV ===
+        // === CENÁRIO 2: API (REST/SOAP) - NOVO ===
+        } else if (isApi) {
+            let apiConfig = {};
+            let endpointUrl = "";
+
+            if (dataSource.origem_datasource === 'RH') {
+                const c = dataSource.hrConfig;
+                apiConfig = c;
+                endpointUrl = c.api_url;
+            } else if (dataSource.origem_datasource === 'SISTEMA') {
+                const c = dataSource.systemConfig;
+                apiConfig = c;
+                // Em Sistemas, a URL específica fica no campo 'diretorio_*'
+                endpointUrl = mappingTarget === 'CONTAS' ? c.diretorio_contas : c.diretorio_recursos;
+            }
+
+            if (!endpointUrl) throw new Error("URL da API não configurada.");
+
+            const response = await api.post("/datasources/test-api", {
+                apiUrl: endpointUrl,
+                method: apiConfig.api_method,
+                headers: apiConfig.api_headers, // O backend espera o JSON Object aqui
+                body: apiConfig.api_body,
+                responsePath: apiConfig.api_response_path
+            }, { headers: authHeaders });
+
+            if (response.data.detectedColumns && Array.isArray(response.data.detectedColumns)) {
+                fetchedCols = response.data.detectedColumns;
+            } else {
+                fetchedCols = []; // API conectou mas não achou array
+            }
+
+        // === CENÁRIO 3: ARQUIVO CSV ===
         } else {
            let diretorio = null;
            
@@ -117,19 +146,23 @@ export function useColumnFetcher(dataSource, mappingTarget) {
            }
 
            if (diretorio) {
-               const response = await api.post("/datasources/test-csv", { diretorio }, { headers: authHeaders });
+               // Busca configs de CSV se existirem
+               const csvDelim = (dataSource.hrConfig || dataSource.systemConfig)?.csv_delimiter || ",";
+               const csvQt = (dataSource.hrConfig || dataSource.systemConfig)?.csv_quote || '"';
+
+               const response = await api.post("/datasources/test-csv", { 
+                   diretorio,
+                   delimiter: csvDelim,
+                   quote: csvQt
+               }, { headers: authHeaders });
                
                if (response.data.header && typeof response.data.header === 'string') {
-                   fetchedCols = response.data.header.split(',');
+                   fetchedCols = response.data.header.split(csvDelim).map(c => c.replace(new RegExp(csvQt, 'g'), '').trim());
                } else {
                    throw new Error("O arquivo CSV parece estar vazio ou sem cabeçalho.");
                }
            } else {
-               if (currentType === 'API') {
-                   fetchedCols = ["Mapeamento Automático (API)"];
-               } else {
-                   throw new Error(`Caminho do arquivo/tabela não encontrado na configuração (${currentType}).`);
-               }
+               throw new Error(`Caminho do arquivo não encontrado na configuração.`);
            }
         }
 
@@ -143,7 +176,6 @@ export function useColumnFetcher(dataSource, mappingTarget) {
             const msg = err.response?.data?.message || err.message || "Erro ao buscar colunas.";
             setError(msg);
         }
-        // Em caso de erro, zera as colunas para não quebrar o map visual
         setColumns([]);
       } finally {
         setLoading(false);
