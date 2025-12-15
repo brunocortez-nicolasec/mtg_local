@@ -234,17 +234,40 @@ function GerenciarDataSources() {
       Cell: ({ row: { original: dataSource } }) => {
         let displayType = dataSource.type_datasource || "N/A";
 
+        // Função para formatar nome do banco (ex: postgres -> Postgres)
         const formatDbName = (type) => type ? ` - ${type.charAt(0).toUpperCase() + type.slice(1)}` : '';
+
+        // --- Lógica de Detecção REST vs SOAP ---
+        const getApiLabel = (config) => {
+             if (!config) return "API - REST"; // Padrão agora é API - REST
+             
+             const body = config.api_body || "";
+             const headers = config.api_headers ? JSON.stringify(config.api_headers).toLowerCase() : "";
+
+             // Se encontrar envelopes SOAP ou headers específicos, marca como SOAP
+             if (
+                 body.toLowerCase().includes("soap:envelope") || 
+                 body.trim().startsWith("<") ||
+                 headers.includes("soapaction")
+             ) {
+                 return "API - SOAP";
+             }
+             
+             // Caso contrário, assume REST
+             return "API - REST";
+        };
 
         // 1. SISTEMA
         if (dataSource.origem_datasource === "SISTEMA" && dataSource.systemConfig) {
-            const { tipo_fonte_contas, tipo_fonte_recursos, db_type } = dataSource.systemConfig;
+            const { tipo_fonte_contas, tipo_fonte_recursos, db_type, api_url } = dataSource.systemConfig;
             
+            // Prioridade para Banco de Dados
             if (tipo_fonte_contas === 'DATABASE' || tipo_fonte_recursos === 'DATABASE') {
                 displayType = `DATABASE${formatDbName(db_type || 'postgres')}`;
             } 
-            else if (tipo_fonte_contas === 'API' || tipo_fonte_recursos === 'API') {
-                displayType = "API";
+            // Se for API (marcado no enum ou inferido pela URL)
+            else if (tipo_fonte_contas === 'API' || tipo_fonte_recursos === 'API' || (api_url && api_url.length > 5)) {
+                displayType = getApiLabel(dataSource.systemConfig);
             } 
             else {
                 displayType = "CSV";
@@ -252,17 +275,22 @@ function GerenciarDataSources() {
         } 
         // 2. RH
         else if (dataSource.origem_datasource === "RH" && dataSource.hrConfig) {
-            const { db_host, db_url, db_type } = dataSource.hrConfig;
+            const { db_host, db_url, db_type, api_url } = dataSource.hrConfig;
             
             if (db_host || db_url) {
                 displayType = `DATABASE${formatDbName(db_type || 'postgres')}`;
-            } else {
+            } 
+            // Se tem URL de API ou foi marcado como tal
+            else if ((api_url && api_url.length > 1) || dataSource.type_datasource === 'API') {
+                displayType = getApiLabel(dataSource.hrConfig);
+            }
+            else {
                 displayType = "CSV";
             }
         }
-        // 3. IDM
+        // 3. IDM (Sempre REST)
         else if (dataSource.origem_datasource === "IDM") {
-             displayType = "API";
+             displayType = "API - REST";
         }
 
         return <MDTypography variant="caption">{displayType}</MDTypography>;

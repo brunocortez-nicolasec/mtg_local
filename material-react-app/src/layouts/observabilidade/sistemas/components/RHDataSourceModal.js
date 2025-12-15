@@ -14,6 +14,10 @@ import RadioGroup from "@mui/material/RadioGroup";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import FormControl from "@mui/material/FormControl";
 import FormLabel from "@mui/material/FormLabel";
+import Switch from "@mui/material/Switch";
+import Divider from "@mui/material/Divider";
+import Icon from "@mui/material/Icon";
+import CircularProgress from "@mui/material/CircularProgress";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
@@ -24,7 +28,8 @@ import MDAlert from "components/MDAlert";
 
 const tipoFonteOptions = ["CSV", "DATABASE", "API"]; 
 const databaseTypeOptions = ["postgres", "mysql", "oracle", "sqlserver"]; 
-const apiMethodOptions = ["GET", "POST"]; // Novo
+const apiMethodOptions = ["GET", "POST"]; 
+const authTypeOptions = ["No Auth", "Basic Auth", "Bearer Token"]; 
 
 function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   
@@ -51,17 +56,33 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
     db_schema: "public",
     db_table: "",
     
-    // --- NOVOS CAMPOS API ---
+    // --- API ---
+    api_subtype: "REST", 
     api_url: "",
     api_method: "GET",
     api_headers: '{"Content-Type": "application/json"}', 
     api_body: "",
     api_response_path: "",
+    
+    // --- AUTH ---
+    api_auth_type: "No Auth",
+    api_auth_user: "",
+    api_auth_password: "",
+    api_auth_token: "",
+
+    // --- AUTH DINÂMICA (OAuth2) ---
+    auth_is_dynamic: false,
+    auth_token_url: "",
+    auth_client_id: "",
+    auth_client_secret: "",
+    auth_grant_type: "client_credentials",
+    auth_scope: "",
   };
 
   const [formData, setFormData] = useState(defaultState);
   const [testStatus, setTestStatus] = useState({ show: false, color: "info", message: "" });
   const [isTesting, setIsTesting] = useState(false);
+  const [isFetchingToken, setIsFetchingToken] = useState(false);
   
   const API_URL = process.env.REACT_APP_API_URL;
 
@@ -75,6 +96,28 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
       setTestStatus({ show: false });
       if (initialData) {
         const config = initialData.hrConfig || {};
+
+        // Inferência REST/SOAP
+        let inferredSubtype = "REST";
+        const bodyContent = config.api_body || "";
+        const headersContent = config.api_headers ? JSON.stringify(config.api_headers).toLowerCase() : "";
+        
+        if (bodyContent.includes("soap:Envelope") || headersContent.includes("text/xml") || headersContent.includes("soapaction")) {
+            inferredSubtype = "SOAP";
+        }
+        
+        // Inferência de Auth
+        let inferredAuthType = "No Auth";
+        let inferredToken = "";
+        
+        if (config.api_headers && config.api_headers.Authorization) {
+            if (config.api_headers.Authorization.startsWith("Bearer ")) {
+                inferredAuthType = "Bearer Token";
+                inferredToken = config.api_headers.Authorization.replace("Bearer ", "");
+            } else if (config.api_headers.Authorization.startsWith("Basic ")) {
+                inferredAuthType = "Basic Auth";
+            }
+        }
 
         setFormData({
             ...defaultState,
@@ -100,11 +143,24 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
             db_table: config.db_table || "",
 
             // API
+            api_subtype: inferredSubtype,
             api_url: config.api_url || "",
             api_method: config.api_method || "GET",
             api_headers: config.api_headers ? JSON.stringify(config.api_headers, null, 2) : '{"Content-Type": "application/json"}',
             api_body: config.api_body || "",
             api_response_path: config.api_response_path || "",
+            
+            // AUTH
+            api_auth_type: inferredAuthType,
+            api_auth_token: inferredToken,
+
+            // Dinamica
+            auth_is_dynamic: config.auth_is_dynamic || false,
+            auth_token_url: config.auth_token_url || "",
+            auth_client_id: config.auth_client_id || "",
+            auth_client_secret: config.auth_client_secret || "",
+            auth_grant_type: config.auth_grant_type || "client_credentials",
+            auth_scope: config.auth_scope || "",
         });
         
       } else {
@@ -119,8 +175,11 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   }, [formData.type_datasource, formData.db_connection_type]);
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const { name, value, checked, type } = e.target;
+    setFormData((prev) => ({ 
+        ...prev, 
+        [name]: type === 'checkbox' ? checked : value 
+    }));
   };
   
   const handleAutocompleteChange = (name, newValue) => {
@@ -136,7 +195,118 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
     });
   };
 
-  // --- Funções de Teste ---
+  const handleApiSubtypeChange = (e) => {
+      const subtype = e.target.value;
+      const isSoap = subtype === "SOAP";
+
+      setFormData(prev => ({
+          ...prev,
+          api_subtype: subtype,
+          api_method: isSoap ? "POST" : "GET",
+          api_headers: isSoap 
+            ? '{\n  "Content-Type": "text/xml",\n  "SOAPAction": "http://tempuri.org/Action"\n}' 
+            : '{\n  "Content-Type": "application/json"\n}',
+          api_body: isSoap 
+            ? '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">\n  <soap:Body>\n    \n  </soap:Body>\n</soap:Envelope>' 
+            : "",
+          api_response_path: ""
+      }));
+  };
+
+  const getFinalHeaders = () => {
+      let headers = {};
+      try {
+          if (formData.api_headers) headers = JSON.parse(formData.api_headers);
+      } catch (e) {
+          console.error("Erro ao parsear headers manuais");
+      }
+
+      if (formData.api_auth_type === "Bearer Token" && formData.api_auth_token) {
+          headers["Authorization"] = `Bearer ${formData.api_auth_token}`;
+      } else if (formData.api_auth_type === "Basic Auth" && formData.api_auth_user && formData.api_auth_password) {
+          const token = btoa(`${formData.api_auth_user}:${formData.api_auth_password}`);
+          headers["Authorization"] = `Basic ${token}`;
+      }
+      return headers;
+  };
+
+  const handleFetchToken = async () => {
+      if (!formData.auth_token_url || !formData.auth_client_id) {
+          setTestStatus({ show: true, color: "warning", message: "Preencha a URL de Token e o Client ID." });
+          return;
+      }
+
+      setIsFetchingToken(true);
+      setTestStatus({ show: false, message: "" }); 
+
+      try {
+          const payload = {
+              client_id: formData.auth_client_id,
+              client_secret: formData.auth_client_secret,
+              grant_type: formData.auth_grant_type,
+              scope: formData.auth_scope
+          };
+
+          const response = await api.post("/datasources/test-api", {
+              apiUrl: formData.auth_token_url,
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams(payload).toString(), 
+              responsePath: "" 
+          });
+
+          if (response.data && response.data.fullResponse) {
+               const token = response.data.fullResponse.access_token || response.data.fullResponse.token;
+               if (token) {
+                   setFormData(prev => ({ ...prev, api_auth_token: token }));
+                   setTestStatus({ show: true, color: "success", message: "Token obtido com sucesso! Campo atualizado." });
+               } else {
+                   setTestStatus({ show: true, color: "warning", message: "Resposta recebida, mas não foi possível extrair 'access_token' automaticamente." });
+               }
+          } else {
+               setTestStatus({ show: true, color: "warning", message: "Token gerado, mas não foi possível extrair automaticamente. Verifique o log." });
+          }
+
+      } catch (error) {
+          console.error("Erro ao buscar token:", error);
+          const msg = error.response?.data?.message || error.message;
+          setTestStatus({ show: true, color: "error", message: `Erro ao obter token: ${msg}` });
+      } finally {
+          setIsFetchingToken(false);
+      }
+  };
+
+  const handleTestAPI = async () => {
+    if (!formData.api_url) {
+        setTestStatus({ show: true, color: "warning", message: "A URL da API é obrigatória." });
+        return;
+    }
+    const finalHeaders = getFinalHeaders();
+
+    setIsTesting(true);
+    setTestStatus({ show: true, color: "info", message: "Enviando requisição..." });
+
+    try {
+        const response = await api.post("/datasources/test-api", {
+            apiUrl: formData.api_url,
+            method: formData.api_method,
+            headers: finalHeaders,
+            body: formData.api_body,
+            responsePath: formData.api_response_path
+        });
+
+        let successMsg = response.data.message;
+        if (response.data.detectedColumns?.length > 0) {
+            successMsg += ` Colunas: [${response.data.detectedColumns.slice(0, 5).join(", ")}...]`;
+        }
+        setTestStatus({ show: true, color: "success", message: successMsg });
+    } catch (error) {
+        const message = error.response?.data?.message || error.message;
+        setTestStatus({ show: true, color: "error", message: `Falha na API: ${message}` });
+    } finally {
+        setIsTesting(false);
+    }
+  };
   
   const handleTestCSV = async () => {
     if (!formData.diretorio_hr) {
@@ -200,45 +370,6 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
         setIsTesting(false);
     }
   };
-
-  // --- NOVA: Teste API ---
-  const handleTestAPI = async () => {
-    if (!formData.api_url) {
-        setTestStatus({ show: true, color: "warning", message: "A URL da API é obrigatória." });
-        return;
-    }
-    let headersJson = {};
-    try {
-        if (formData.api_headers) headersJson = JSON.parse(formData.api_headers);
-    } catch (e) {
-        setTestStatus({ show: true, color: "error", message: "Formato de Headers inválido. Deve ser um JSON válido." });
-        return;
-    }
-
-    setIsTesting(true);
-    setTestStatus({ show: true, color: "info", message: "Enviando requisição..." });
-
-    try {
-        const response = await api.post("/datasources/test-api", {
-            apiUrl: formData.api_url,
-            method: formData.api_method,
-            headers: headersJson,
-            body: formData.api_body,
-            responsePath: formData.api_response_path
-        });
-
-        let successMsg = response.data.message;
-        if (response.data.detectedColumns?.length > 0) {
-            successMsg += ` Colunas: [${response.data.detectedColumns.slice(0, 5).join(", ")}...]`;
-        }
-        setTestStatus({ show: true, color: "success", message: successMsg });
-    } catch (error) {
-        const message = error.response?.data?.message || error.message;
-        setTestStatus({ show: true, color: "error", message: `Falha na API: ${message}` });
-    } finally {
-        setIsTesting(false);
-    }
-  };
   
   const handleTestConnection = () => {
       if (formData.type_datasource === "CSV") return handleTestCSV();
@@ -256,8 +387,7 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   };
   
   const handleSave = () => {
-    let finalHeaders = {};
-    try { if (formData.api_headers) finalHeaders = JSON.parse(formData.api_headers); } catch(e) {}
+    const finalHeaders = getFinalHeaders();
 
     const payload = {
         name: formData.name,
@@ -266,7 +396,6 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
         databaseType: formData.type_datasource, 
         diretorio: formData.diretorio_hr, 
         
-        // Passa o tipo novo também
         type_datasource: formData.type_datasource,
         diretorio_hr: formData.diretorio_hr,
         
@@ -289,7 +418,15 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
         api_method: formData.api_method,
         api_headers: finalHeaders,
         api_body: formData.api_body,
-        api_response_path: formData.api_response_path
+        api_response_path: formData.api_response_path,
+
+        // AUTH DINAMICA
+        auth_is_dynamic: formData.auth_is_dynamic,
+        auth_token_url: formData.auth_token_url,
+        auth_client_id: formData.auth_client_id,
+        auth_client_secret: formData.auth_client_secret,
+        auth_grant_type: formData.auth_grant_type,
+        auth_scope: formData.auth_scope
     };
     onSave(payload); 
   };
@@ -311,7 +448,6 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                 </>
             );
         case "DATABASE":
-            // --- LÓGICA RESTAURADA EXATAMENTE COMO ESTAVA ---
             const isOracle = formData.db_type === 'oracle';
             const dbNameLabel = isOracle ? "Service Name / SID" : "Nome do Banco";
             const schemaPlaceholder = isOracle ? "USUARIO (Schema)" : "public";
@@ -375,9 +511,20 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                     <Grid item xs={12} md={8}><MDInput label="Tabela Principal" name="db_table" value={formData.db_table} onChange={handleInputChange} fullWidth placeholder="Ex: tb_funcionarios" required error={!formData.db_table} /></Grid>
                 </>
             );
-        case "API": // --- NOVO: BLOCO API ---
+        case "API":
             return (
                 <>
+                    {/* SELEÇÃO REST vs SOAP */}
+                    <Grid item xs={12}>
+                        <FormControl component="fieldset">
+                          <FormLabel component="legend" sx={{ fontSize: '0.875rem', mb: 1, color: 'text.main' }}>Tipo de API</FormLabel>
+                          <RadioGroup row name="api_subtype" value={formData.api_subtype} onChange={handleApiSubtypeChange}>
+                            <FormControlLabel value="REST" control={<Radio />} label={<MDTypography variant="body2" fontWeight={formData.api_subtype === 'REST' ? "bold" : "regular"}>REST (JSON)</MDTypography>} />
+                            <FormControlLabel value="SOAP" control={<Radio />} label={<MDTypography variant="body2" fontWeight={formData.api_subtype === 'SOAP' ? "bold" : "regular"}>SOAP (XML)</MDTypography>} />
+                          </RadioGroup>
+                        </FormControl>
+                    </Grid>
+
                     <Grid item xs={12} md={3}>
                       <Autocomplete
                         options={apiMethodOptions}
@@ -385,36 +532,136 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                         onChange={(e, nv) => handleAutocompleteChange("api_method", nv)}
                         renderInput={(params) => <MDInput {...params} label="Método" />}
                         fullWidth
+                        disabled={formData.api_subtype === 'SOAP'} 
                       />
                     </Grid>
                     <Grid item xs={12} md={9}>
-                        <MDInput label="URL do Endpoint" name="api_url" value={formData.api_url} onChange={handleInputChange} fullWidth placeholder="https://api.sistema.com/users" />
+                        <MDInput label="URL do Endpoint" name="api_url" value={formData.api_url} onChange={handleInputChange} fullWidth placeholder={formData.api_subtype === 'SOAP' ? "https://api.empresa.com/ws/service.asmx" : "https://api.sistema.com/users"} />
                     </Grid>
                     
+                    {/* --- AUTHENTICATION (REST) --- */}
+                    {formData.api_subtype === 'REST' && (
+                        <>
+                             <Grid item xs={12}>
+                                  <MDTypography variant="caption" fontWeight="bold" color="text" textTransform="uppercase">Autenticação</MDTypography>
+                             </Grid>
+                             
+                             <Grid item xs={12} md={4}>
+                                  <Autocomplete
+                                    options={authTypeOptions}
+                                    value={formData.api_auth_type}
+                                    onChange={(e, nv) => handleAutocompleteChange("api_auth_type", nv)}
+                                    renderInput={(params) => <MDInput {...params} label="Tipo de Autenticação" />}
+                                    fullWidth
+                                    disableClearable
+                                  />
+                             </Grid>
+                             
+                             {formData.api_auth_type === 'Basic Auth' && (
+                                 <>
+                                     <Grid item xs={12} md={4}>
+                                        <MDInput label="Usuário" name="api_auth_user" value={formData.api_auth_user} onChange={handleInputChange} fullWidth />
+                                     </Grid>
+                                     <Grid item xs={12} md={4}>
+                                        <MDInput label="Senha" name="api_auth_password" value={formData.api_auth_password} type="password" onChange={handleInputChange} fullWidth />
+                                     </Grid>
+                                 </>
+                             )}
+                             
+                             {formData.api_auth_type === 'Bearer Token' && (
+                                 <Grid item xs={12} md={8}>
+                                    <MDInput 
+                                        label="Token (Bearer)" 
+                                        name="api_auth_token" 
+                                        value={formData.api_auth_token} 
+                                        onChange={handleInputChange} 
+                                        fullWidth 
+                                        placeholder="eyJhbGciOiJIUz..." 
+                                        InputProps={{
+                                            endAdornment: (
+                                                <Tooltip title="Ativar requisição automática de token (Bearer)">
+                                                    <Switch checked={formData.auth_is_dynamic} onChange={(e) => handleInputChange({ target: { name: 'auth_is_dynamic', value: null, checked: e.target.checked, type: 'checkbox' } })} />
+                                                </Tooltip>
+                                            )
+                                        }}
+                                        helperText={formData.auth_is_dynamic ? "Modo Dinâmico: Token será gerado automaticamente." : ""}
+                                    />
+                                 </Grid>
+                             )}
+
+                             {/* --- OAUTH2 / DYNAMIC TOKEN (LIMPO + CORREÇÃO DE ALINHAMENTO) --- */}
+                             {formData.api_auth_type === 'Bearer Token' && formData.auth_is_dynamic && (
+                                 <>
+                                     <Grid item xs={12}>
+                                         <Divider sx={{my: 1}} />
+                                         <MDBox display="flex" alignItems="center">
+                                                <Icon color="info" sx={{ mr: 1 }}>sync</Icon>
+                                                <MDTypography variant="button" fontWeight="bold" color="info" textTransform="uppercase">
+                                                    Configuração de Token (Bearer)
+                                                </MDTypography>
+                                         </MDBox>
+                                     </Grid>
+                                     
+                                     <Grid item xs={12} md={8}>
+                                         <MDInput label="URL do Token" name="auth_token_url" value={formData.auth_token_url} onChange={handleInputChange} fullWidth placeholder="https://auth.provider.com/token" />
+                                     </Grid>
+                                     <Grid item xs={12} md={4}>
+                                         <MDInput label="Grant Type" name="auth_grant_type" value={formData.auth_grant_type} onChange={handleInputChange} fullWidth placeholder="client_credentials" />
+                                     </Grid>
+                                     <Grid item xs={12} md={6}>
+                                         <MDInput label="Client ID" name="auth_client_id" value={formData.auth_client_id} onChange={handleInputChange} fullWidth />
+                                     </Grid>
+                                     <Grid item xs={12} md={6}>
+                                         <MDInput label="Client Secret" name="auth_client_secret" value={formData.auth_client_secret} onChange={handleInputChange} fullWidth type="password" />
+                                     </Grid>
+                                     <Grid item xs={12} md={12}>
+                                         <MDInput label="Scope (Opcional)" name="auth_scope" value={formData.auth_scope} onChange={handleInputChange} fullWidth placeholder="read write" />
+                                     </Grid>
+                                     <Grid item xs={12} display="flex" justifyContent="flex-end">
+                                         <MDButton 
+                                            variant="outlined" 
+                                            color="info" 
+                                            size="small" 
+                                            onClick={handleFetchToken}
+                                            disabled={isFetchingToken}
+                                         >
+                                             {isFetchingToken ? <CircularProgress size={16} /> : "Gerar Token"}
+                                         </MDButton>
+                                     </Grid>
+                                     <Grid item xs={12}><Divider sx={{my: 1}} /></Grid>
+                                 </>
+                             )}
+                        </>
+                    )}
+
+                    <Grid item xs={12}>
+                        <MDTypography variant="caption" fontWeight="bold" color="text" textTransform="uppercase">Configurações Avançadas</MDTypography>
+                    </Grid>
+
                     <Grid item xs={12}>
                         <MDInput 
-                            label="Headers (JSON)" 
+                            label="Headers Adicionais (JSON)" 
                             name="api_headers" 
                             value={formData.api_headers} 
                             onChange={handleInputChange} 
                             fullWidth 
                             multiline 
                             rows={3} 
-                            placeholder='{"Authorization": "Bearer token"}' 
-                            helperText="Insira os headers em formato JSON."
+                            placeholder='{"Custom-Header": "Valor"}' 
+                            helperText={formData.api_auth_type !== 'No Auth' ? "O header 'Authorization' será adicionado automaticamente." : "Insira os headers em formato JSON."}
                         />
                     </Grid>
 
                     <Grid item xs={12}>
                         <MDInput 
-                            label="Body (JSON ou XML)" 
+                            label={formData.api_subtype === 'SOAP' ? "Envelope SOAP (XML)" : "Body (JSON)"}
                             name="api_body" 
                             value={formData.api_body} 
                             onChange={handleInputChange} 
                             fullWidth 
                             multiline 
-                            rows={4} 
-                            placeholder='Para POST/SOAP, insira o corpo da requisição.' 
+                            rows={5} 
+                            placeholder={formData.api_subtype === 'SOAP' ? "<soap:Envelope...>" : "{ 'filter': 'active' }"} 
                         />
                     </Grid>
 
@@ -425,8 +672,8 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                             value={formData.api_response_path} 
                             onChange={handleInputChange} 
                             fullWidth 
-                            placeholder="Ex: data.results" 
-                            helperText="Opcional. Caminho para achar o array no JSON."
+                            placeholder={formData.api_subtype === 'SOAP' ? "soap:Envelope.soap:Body.GetResponse.Result" : "data.results"} 
+                            helperText="Opcional. Caminho para achar a lista de usuários na resposta."
                         />
                     </Grid>
                 </>

@@ -110,10 +110,10 @@ model Group {
 }
 
 model Platform {
-  id       Int      @id @default(autoincrement())
-  name     String   @unique
-  key      String   @unique
-  route    String   @unique
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  key      String    @unique
+  route    String    @unique
   icon     String?
   packages Package[]
 
@@ -121,8 +121,8 @@ model Platform {
 }
 
 model Package {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -213,6 +213,21 @@ model HRConfig {
   api_headers       Json?     // Armazena headers como JSON: {"Authorization": "Bearer x"}
   api_body          String?   // Corpo da requisição (JSON string ou XML Envelope)
   api_response_path String?   // Caminho para achar o array de dados na resposta (ex: "data.users")
+
+  // --- ADIÇÃO: Classificação e Auth Avançada ---
+  api_subtype        String?   @default("REST") // "REST" ou "SOAP"
+  api_auth_type      String?   @default("No Auth") // "No Auth", "Basic Auth", "Bearer Token"
+  api_auth_user      String?   // Para Basic Auth
+  api_auth_password  String?   // Para Basic Auth
+  api_auth_token     String?   // Para Bearer Token (Estático) ou cache do Dinâmico
+
+  // --- ADIÇÃO: Configuração de Token Dinâmico ---
+  auth_is_dynamic    Boolean   @default(false)
+  auth_token_url     String?   // Endpoint para pedir o token
+  auth_client_id     String?
+  auth_client_secret String?
+  auth_grant_type    String?   @default("client_credentials")
+  auth_scope         String?
 
   @@map("HRConfig")
 }
@@ -435,6 +450,21 @@ model SystemConfig {
   api_headers       Json?
   api_body          String?
   api_response_path String?
+
+  // --- ADIÇÃO: Classificação e Auth Avançada ---
+  api_subtype        String?   @default("REST") // "REST" ou "SOAP"
+  api_auth_type      String?   @default("No Auth") // "No Auth", "Basic Auth", "Bearer Token"
+  api_auth_user      String?   // Para Basic Auth
+  api_auth_password  String?   // Para Basic Auth
+  api_auth_token     String?   // Para Bearer Token (Estático) ou cache do Dinâmico
+
+  // --- ADIÇÃO: Configuração de Token Dinâmico ---
+  auth_is_dynamic    Boolean   @default(false)
+  auth_token_url     String?   // Endpoint para pedir o token
+  auth_client_id     String?
+  auth_client_secret String?
+  auth_grant_type    String?   @default("client_credentials")
+  auth_scope         String?
 
   @@map("SystemConfig")
 }

@@ -35,22 +35,6 @@ function PillKpi({ label, count, color }) {
   );
 }
 
-function DetailList({ title, items }) {
-  return (
-    <Card sx={{ height: "100%", p: 2 }}>
-      <MDTypography variant="overline" color="secondary" fontWeight="medium">
-        {title}
-      </MDTypography>
-      {items.map((item) => (
-        <MDBox key={item.label} display="flex" justifyContent="space-between" alignItems="center" pt={1.5}>
-          <MDTypography variant="button" fontWeight="regular" color="text">{item.label}</MDTypography>
-          <MDTypography variant="h6" fontWeight="bold" color={item.color || "dark"}>{item.value}</MDTypography>
-        </MDBox>
-      ))}
-    </Card>
-  );
-}
-
 function MiniMetricCard({ title, count, color = "dark" }) {
   return (
     <MDBox p={1} textAlign="center">
@@ -64,7 +48,7 @@ function MiniMetricCard({ title, count, color = "dark" }) {
   );
 }
 
-function Painel({ imDisplay, onPieChartClick, onPlatformChange, selectedPlatform }) {
+function Painel({ imDisplay, onPieChartClick, divergenceChart, onDivergenceChartClick, onPlatformChange, selectedPlatform }) {
   const navigate = useNavigate();
 
   const [controller] = useMaterialUIController();
@@ -85,7 +69,6 @@ function Painel({ imDisplay, onPieChartClick, onPlatformChange, selectedPlatform
         const response = await api.get('/systems');
         const data = response.data;
         
-        // Blindagem de Array
         const safeData = Array.isArray(data) ? data : [];
         
         const systemNames = new Set(
@@ -141,7 +124,7 @@ function Painel({ imDisplay, onPieChartClick, onPlatformChange, selectedPlatform
           />
           <MDButton variant="outlined" color="info" size="small" onClick={handleRedirectToImportPage}>
             <Icon sx={{ mr: 0.5 }}>upload</Icon>
-            Importar CSV
+            Importar Dados
           </MDButton>
         </MDBox>
       </MDBox>
@@ -160,14 +143,54 @@ function Painel({ imDisplay, onPieChartClick, onPlatformChange, selectedPlatform
               </MDBox>
             </Card>
           </Grid>
-          <Grid item xs={12} md={4}><DetailList title="Tipos de Usuários" items={imDisplay.tiposList || []} /></Grid>
+
+          {/* COLUNA 1: Gráfico de Divergências */}
+          <Grid item xs={12} md={4}>
+             <Card sx={{ height: "100%" }}>
+                {/* ALTERAÇÃO AQUI: pt={2} e pb={1} para controle fino */}
+                <MDBox pt={2} pb={1} px={2} display="flex" justifyContent="center">
+                    {/* ALTERAÇÃO AQUI: m: 0 e lineHeight: 1 removem a margem indesejada */}
+                    <MDTypography 
+                        variant="h6" 
+                        fontWeight="medium" 
+                        textTransform="capitalize" 
+                        sx={{ fontSize: "1rem", m: 0, lineHeight: 0 }}
+                    >
+                        Tipos de Divergência
+                    </MDTypography>
+                </MDBox>
+                
+                {/* Mantendo altura para o gráfico não cortar */}
+                <MDBox p={1} pt={0} sx={{ height: "100%", minHeight: "165px" }}>
+                   <PieChart chart={divergenceChart} onClick={onDivergenceChartClick} />
+                </MDBox>
+             </Card>
+          </Grid>
+
+          {/* COLUNA 2: Gráfico de Tipos de Usuários */}
           <Grid item xs={12} md={4}>
             <Card sx={{ height: "100%" }}>
-              <MDBox p={2} sx={{ height: "100%" }}>
+              {/* ALTERAÇÃO AQUI: pt={2} e pb={1} para controle fino */}
+              <MDBox pt={2} pb={1} px={2} display="flex" justifyContent="center">
+                 {/* ALTERAÇÃO AQUI: m: 0 e lineHeight: 1 removem a margem indesejada */}
+                 <MDTypography 
+                    variant="h6" 
+                    fontWeight="medium" 
+                    textTransform="capitalize" 
+                    sx={{ fontSize: "1rem", m: 0, lineHeight: 0 }}
+                 >
+                    Tipos de Usuários
+                 </MDTypography>
+              </MDBox>
+              
+              {/* Mantendo altura para o gráfico não cortar */}
+              <MDBox p={1} pt={0} sx={{ height: "100%", minHeight: "165px" }}>
                 <PieChart chart={imDisplay.tiposChart} onClick={onPieChartClick} />
               </MDBox>
             </Card>
           </Grid>
+          
+          {/* COLUNA 3: Cards de Métricas */}
           <Grid item xs={12} md={4}>
             <Grid container spacing={2}>
               <Grid item xs={12}>
@@ -197,29 +220,15 @@ function Painel({ imDisplay, onPieChartClick, onPlatformChange, selectedPlatform
 Painel.propTypes = {
   imDisplay: PropTypes.object.isRequired,
   onPieChartClick: PropTypes.func.isRequired,
+  divergenceChart: PropTypes.object,
+  onDivergenceChartClick: PropTypes.func,
   onPlatformChange: PropTypes.func.isRequired,
   selectedPlatform: PropTypes.string.isRequired,
 };
 
-PillKpi.propTypes = {
-  label: PropTypes.string.isRequired,
-  count: PropTypes.number.isRequired,
-  color: PropTypes.string.isRequired,
-};
-
-DetailList.propTypes = {
-  title: PropTypes.string.isRequired,
-  items: PropTypes.arrayOf(PropTypes.shape({
-    label: PropTypes.string.isRequired,
-    value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
-    color: PropTypes.string,
-  })).isRequired,
-};
-
-MiniMetricCard.propTypes = {
-  title: PropTypes.string.isRequired,
-  count: PropTypes.number.isRequired,
-  color: PropTypes.string,
+Painel.defaultProps = {
+  divergenceChart: { labels: [], datasets: {} },
+  onDivergenceChartClick: () => {},
 };
 
 export default Painel;

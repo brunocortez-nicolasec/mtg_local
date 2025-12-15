@@ -16,7 +16,7 @@ import AuthService from "../../services/auth-service";
 import axios from "axios";
 import { useMaterialUIController, setAuth } from "context";
 
-// Componente auxiliar
+// Componente auxiliar para exibir itens do perfil
 const ProfileInfoItem = ({ label, value, children }) => (
   <MDBox display="flex" flexDirection="column" mb={2}>
     <MDTypography variant="caption" fontWeight="bold" color="text" textTransform="uppercase">
@@ -49,23 +49,29 @@ const UserProfile = () => {
 
   const API_URL = process.env.REACT_APP_API_URL;
 
+  // --- CORREÇÃO PRINCIPAL: Leitura Inteligente dos Dados ---
+  // O App.js agora entrega os dados "limpos" na raiz do objeto authUser.
+  // Esta lógica garante que leremos corretamente independente do formato.
   useEffect(() => {
-    if (authUser?.data?.attributes) {
-      const attr = authUser.data.attributes;
+    if (authUser) {
+      // Tenta pegar de 'data.attributes' (formato antigo/bruto) OU direto da raiz (formato novo/limpo)
+      const attributes = authUser.data?.attributes || authUser;
       
       setUserData({
-        name: attr.name,
-        email: attr.email,
-        role: attr.role,
-        package: attr.package,
-        groups: attr.groups || [],
-        createdAt: attr.createdAt ? new Date(attr.createdAt).toLocaleDateString('pt-BR') : ""
+        name: attributes.name || "",
+        email: attributes.email || "",
+        // O role pode vir como string direta ou dentro de um objeto profile
+        role: attributes.role || (attributes.profile ? attributes.profile.name : ""),
+        package: attributes.package || "",
+        groups: attributes.groups || [],
+        createdAt: attributes.createdAt ? new Date(attributes.createdAt).toLocaleDateString('pt-BR') : ""
       });
 
-      // Carrega a imagem inicial
-      setFormState(prev => ({ ...prev, profile_image: attr.profile_image }));
+      // Atualiza a imagem no estado do formulário
+      setFormState(prev => ({ ...prev, profile_image: attributes.profile_image }));
     }
   }, [authUser]);
+  // ---------------------------------------------------------
 
   useEffect(() => {
     if (notification.show) {
@@ -76,13 +82,16 @@ const UserProfile = () => {
 
   const changeHandler = (e) => setFormState({ ...formState, [e.target.name]: e.target.value });
 
-  // --- LÓGICA DE VALIDAÇÃO E ESTADO DO BOTÃO ---
+  // --- LÓGICA DE VALIDAÇÃO ---
+  const getOriginalImage = () => {
+      if (!authUser) return null;
+      // Mesma lógica de leitura inteligente para a imagem original
+      return authUser.data?.attributes?.profile_image || authUser.profile_image;
+  };
   
-  // 1. Verifica se a imagem mudou em relação ao que veio do banco
-  const originalImage = authUser?.data?.attributes?.profile_image;
+  const originalImage = getOriginalImage();
   const hasImageChanged = formState.profile_image !== originalImage;
 
-  // 2. Validações de Senha
   const passwordChanged = formState.newPassword.length > 0;
   const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*(),.?":{}|<>])(?=.{8,})/;
   const isComplex = passwordRegex.test(formState.newPassword);
@@ -91,12 +100,9 @@ const UserProfile = () => {
   const complexityError = passwordChanged && !isComplex;
   const matchError = passwordChanged && !doPasswordsMatch;
 
-  // A senha é válida se: não foi mexida OU (foi mexida E está correta)
   const isPasswordValid = !passwordChanged || (isComplex && doPasswordsMatch);
-
-  // Pode salvar se: (Mudou Imagem OU Mudou Senha) E (Senha está válida)
   const canSave = (hasImageChanged || passwordChanged) && isPasswordValid;
-  // ---------------------------------------------
+  // ---------------------------
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -113,12 +119,10 @@ const UserProfile = () => {
 
     const attributes = {};
 
-    // Só envia imagem se mudou
     if (hasImageChanged) {
         attributes.profile_image = formState.profile_image;
     }
 
-    // Só envia senha se mudou
     if (passwordChanged) {
         attributes.newPassword = formState.newPassword;
         attributes.confirmPassword = formState.confirmPassword;
@@ -127,14 +131,24 @@ const UserProfile = () => {
     try {
       await AuthService.updateProfile({ data: { attributes } }); 
       
+      // Busca os dados atualizados
       const updatedUserResponse = await axios.get(`${API_URL}/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      setAuth(dispatch, { token, user: updatedUserResponse.data });
+      // --- CORREÇÃO NO UPDATE: Normaliza os dados antes de salvar no contexto ---
+      const backendData = updatedUserResponse.data.data;
+      const userAttributes = backendData?.attributes || updatedUserResponse.data;
+      
+      const userFormatted = {
+          id: backendData?.id || updatedUserResponse.data.id,
+          ...userAttributes
+      };
+
+      setAuth(dispatch, { token, user: userFormatted });
       setNotification({ show: true, message: "Alterações salvas com sucesso!", color: "success" });
       
-      // Limpa campos de senha após salvar
+      // Limpa os campos de senha
       setFormState(prev => ({ ...prev, newPassword: "", confirmPassword: "" }));
 
     } catch (error) {
@@ -150,8 +164,8 @@ const UserProfile = () => {
       <DashboardNavbar />
       <MDBox mb={2} />
       <Header
-        name={userData.name || "Carregando..."} 
-        role={userData.role}
+        name={userData.name || "Usuário"} 
+        role={userData.role || "Sem perfil"}
         profileImage={formState.profile_image} 
         onAvatarClick={handleAvatarClick}
       >
@@ -167,7 +181,7 @@ const UserProfile = () => {
             <Grid container spacing={1}>
                 {/* Coluna da Esquerda: Dados Cadastrais */}
                 <Grid item xs={12} md={6} xl={4}>
-                     <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
+                      <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
                         <MDBox p={2}>
                             <MDTypography variant="h6" fontWeight="medium" textTransform="capitalize">
                                 Informações da Conta
@@ -190,7 +204,7 @@ const UserProfile = () => {
 
                 {/* Coluna do Meio: Acessos e Grupos */}
                 <Grid item xs={12} md={6} xl={4}>
-                     <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
+                      <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
                         <MDBox p={2}>
                             <MDTypography variant="h6" fontWeight="medium" textTransform="capitalize">
                                 Acessos e Permissões
@@ -200,7 +214,7 @@ const UserProfile = () => {
                              <ProfileInfoItem label="Pacote Atribuído" value={userData.package} />
                              
                              <ProfileInfoItem label="Grupos">
-                                 {userData.groups.length > 0 ? (
+                                 {userData.groups && userData.groups.length > 0 ? (
                                      <MDBox display="flex" flexWrap="wrap" gap={1}>
                                          {userData.groups.map((group, idx) => (
                                              <Chip 
@@ -222,7 +236,7 @@ const UserProfile = () => {
 
                 {/* Coluna da Direita: Alterar Senha e Salvar */}
                 <Grid item xs={12} xl={4}>
-                     <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
+                      <Card sx={{ height: "100%", boxShadow: "none", border: "1px solid #e0e0e0" }}>
                         <MDBox p={2}>
                             <MDTypography variant="h6" fontWeight="medium" textTransform="capitalize">
                                 Segurança & Perfil
@@ -269,7 +283,7 @@ const UserProfile = () => {
                                     variant="gradient" 
                                     color="info" 
                                     type="submit"
-                                    disabled={!canSave} // Habilita se mudar foto OU senha válida
+                                    disabled={!canSave}
                                 >
                                     Salvar Alterações
                                 </MDButton>

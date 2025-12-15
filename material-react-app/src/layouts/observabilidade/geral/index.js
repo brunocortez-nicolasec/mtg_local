@@ -39,14 +39,14 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 
 // Componentes locais
 import LiveFeed from "./components/LiveFeed";
-import Painel from "./components/Painel";
+import Painel from "./components/Painel"; 
 import RisksChartCard from "./components/RisksChartCard";
 import useDashboardData from "./hooks/useDashboardData";
 import FinancialCards from "./components/FinancialCards";
 import RiskAnalysisWidgets from "./components/RiskAnalysisWidgets";
 import KpiStack from "./components/KpiStack";
 
-// --- COMPONENTES DE MODAL (Mantidos e Blindados) ---
+// --- COMPONENTES DE MODAL ---
 
 const ModalContent = React.forwardRef(({ title, data, onClose, darkMode }, ref) => (
     <Box ref={ref} tabIndex={-1}>
@@ -110,6 +110,14 @@ const DrillDownModal = React.forwardRef(({ title, data, isLoading, onIgnore, onI
             cols.push({ Header: "CPF (RH)", accessor: "rhData.cpf_hr", Cell: ({ value }) => <MDTypography variant="caption">{value || 'N/A'}</MDTypography> });
             cols.push({ Header: "CPF (App)", accessor: "appData.cpf_account", Cell: ({ value }) => <MDTypography variant="caption" color="error">{value || 'N/A'}</MDTypography> });
         
+        } else if (divergenceCode === 'SOD_VIOLATION') {
+            cols.push({ Header: "Email", accessor: "email", Cell: ({ value }) => <MDTypography variant="caption">{value || '-'}</MDTypography> });
+            cols.push({ Header: "Conflito", accessor: "details", Cell: ({ value }) => <MDTypography variant="caption" color="error">{value || 'Violação de SOD'}</MDTypography> });
+
+        } else if (divergenceCode === 'ORPHAN_ACCOUNT') {
+            cols.push({ Header: "Login/ID", accessor: "login", Cell: ({ value }) => <MDTypography variant="caption">{value || '-'}</MDTypography> });
+            cols.push({ Header: "Status", accessor: "status", Cell: ({ value }) => <MDTypography variant="caption" color="error">{value || 'Órfã'}</MDTypography> });
+
         } else {
             cols.push({ Header: "Email", accessor: "email", Cell: ({ value }) => <MDTypography variant="caption">{value || '-'}</MDTypography> });
             cols.push({ Header: "Perfil (App)", accessor: "profile", align: "center", Cell: ({ value }) => <MDTypography variant="caption">{value || "N/A"}</MDTypography> });
@@ -139,7 +147,6 @@ const DrillDownModal = React.forwardRef(({ title, data, isLoading, onIgnore, onI
         return cols;
     }, [data, divergenceCode, onIgnore]);
 
-    // Blindagem: Garante que 'data' seja array
     const safeData = Array.isArray(data) ? data : [];
 
     return (
@@ -259,7 +266,6 @@ function VisaoGeral() {
         try {
             const [metricsResponse, liveFeedResponse] = await Promise.all([metricsPromise, liveFeedPromise]);
             setMetrics(metricsResponse.data);
-            // Blindagem
             setLiveFeedData(Array.isArray(liveFeedResponse.data) ? liveFeedResponse.data : []);
         } catch (error) {
             console.error("Erro ao buscar dados do dashboard:", error);
@@ -277,7 +283,6 @@ function VisaoGeral() {
         }
     }, [plataformaSelecionada, token]);
 
-    // Hook (já blindado anteriormente)
     const displayData = useDashboardData(metrics, isLoading);
     
     const handlePlatformChange = (plataforma) => setPlataformaSelecionada(plataforma);
@@ -290,7 +295,6 @@ function VisaoGeral() {
             const response = await api.get(`/divergences/by-code/${code}`, {
                 params: { system: plataformaSelecionada === 'Geral' ? undefined : plataformaSelecionada }
             });
-            // Blindagem
             const data = Array.isArray(response.data) ? response.data : [];
             setDrillDownState(prev => ({ ...prev, isLoading: false, data: data }));
         } catch (error) {
@@ -409,22 +413,136 @@ function VisaoGeral() {
         handleOpenModal();
     };
 
-    // --- CORREÇÃO NA LÓGICA DE FILTRAGEM DO GRÁFICO PIZZA ---
-    const handlePieChartClick = (event, elements) => {
-        if (!elements || elements.length === 0) return;
-        const { index } = elements[0];
+    // --- DADOS DO GRÁFICO DE DIVERGÊNCIAS (ATUALIZADO E COMPLETO) ---
+    const divergenceChartData = useMemo(() => {
+        if (!displayData?.imDisplay?.divergencias) return { labels: [], datasets: {} };
+        
+        return {
+            labels: [
+                "Acessos Indevidos", 
+                "Contas Órfãs",          
+                "Violações de SOD",      
+                "Ativos não enc. no RH", // NOVO
+                "Admins com Risco",      // NOVO
+                "Divergência de CPF", 
+                "Não Concedidos", 
+                "Divergência de Nome", 
+                "Divergência de Email", 
+                "Admins Dormentes"
+            ],
+            datasets: {
+                label: "Tipos de Divergência",
+                // CORREÇÃO CRÍTICA: backgroundColor (singular) para funcionar o array de cores
+                backgroundColor: [
+                    "#F44335", // Acessos Indevidos (Erro)
+                    "#009688", // Contas Órfãs (Teal)
+                    "#9C27B0", // SOD (Roxo)
+                    "#FF9800", // Ativos não enc. no RH (Laranja forte)
+                    "#FF5722", // Admins com Risco (Deep Orange)
+                    "#FB8C00", // CPF (Warning)
+                    "#1A73E8", // Não Concedidos (Info)
+                    "#7B809A", // Nome (Secondary)
+                    "#E91E63", // Email (Primary)
+                    "#344767"  // Admins Dormentes (Dark)
+                ],
+                data: [
+                    displayData.imDisplay.divergencias.inativosRHAtivosApp || 0,
+                    displayData.imDisplay.divergencias.contasOrfas || 0,
+                    displayData.imDisplay.divergencias.sodViolations || 0,
+                    displayData.imDisplay.divergencias.ativosNaoEncontradosRH || 0,  // NOVO
+                    displayData.riscosEmContasPrivilegiadas || 0,                    // NOVO
+                    displayData.imDisplay.divergencias.cpf || 0,
+                    displayData.imDisplay.divergencias.acessoPrevistoNaoConcedido || 0,
+                    displayData.imDisplay.divergencias.nome || 0,
+                    displayData.imDisplay.divergencias.email || 0,
+                    displayData.imDisplay.kpisAdicionais?.adminsDormentes || 0
+                ],
+            },
+        };
+    }, [displayData]);
+
+    // --- FUNÇÃO DE CLIQUE ATUALIZADA (API + FILTROS LOCAIS) ---
+    const handleDivergenceChartClick = (event, elements) => {
+        // Fallback para pegar elementos
+        const activeElements = elements || (Array.isArray(event) ? event : []);
+        if (!activeElements || activeElements.length === 0) return;
+        
+        const { index } = activeElements[0];
+        
+        // Mapeamento: Alguns chamam API (code), outros chamam filtro local (localFilter)
+        const divergenceMap = [
+            { label: "Acessos Indevidos", code: 'ZOMBIE_ACCOUNT' },
+            { label: "Contas Órfãs", code: 'ORPHAN_ACCOUNT' },
+            { label: "Violações de SOD", code: 'SOD_VIOLATION' },
+            { label: "Ativos não enc. no RH", localFilter: 'ativos_rh' }, // NOVO
+            { label: "Admins com Risco", localFilter: 'admin_risk' },     // NOVO
+            { label: "Divergência de CPF", code: 'CPF_MISMATCH' },
+            { label: "Não Concedidos", code: 'ACCESS_NOT_GRANTED' },
+            { label: "Divergência de Nome", code: 'NAME_MISMATCH' },
+            { label: "Divergência de Email", code: 'EMAIL_MISMATCH' },
+            { label: "Admins Dormentes", code: 'DORMANT_ADMIN' }
+        ];
+
+        const selected = divergenceMap[index];
+        if (!selected) return;
+
+        // Se tiver 'code', chama a API (padrão)
+        if (selected.code) {
+            handleKpiItemClick(selected.code, selected.label);
+        } 
+        // Se tiver 'localFilter', filtra a liveFeedData
+        else if (selected.localFilter) {
+            let filteredRows = [];
+            const modalTitle = `Detalhes: ${selected.label}`;
+            
+            if (selected.localFilter === 'admin_risk') {
+                // Filtro para Admins com Divergência
+                filteredRows = liveFeedData.filter(item => 
+                    item.perfil && item.perfil.toLowerCase().includes('admin') && item.divergence
+                );
+            } else if (selected.localFilter === 'ativos_rh') {
+                // Filtro para Ativos não encontrados no RH (Geralmente é ZOMBIE, mas filtramos localmente para garantir)
+                filteredRows = liveFeedData.filter(item => 
+                    item.rh_status === 'Não encontrado' && item.app_status === 'Ativo'
+                );
+            }
+
+            setModalContent({
+                title: modalTitle,
+                data: {
+                    columns: [
+                        { Header: "Sistema", accessor: "sourceSystem" },
+                        { Header: "Nome", accessor: "name" },
+                        { Header: "Email", accessor: "email" },
+                        { Header: "Perfil", accessor: "profile" },
+                        { Header: "Status App", accessor: "app_status" },
+                        { Header: "Status RH", accessor: "rh_status" }
+                    ],
+                    rows: filteredRows
+                }
+            });
+            handleOpenModal();
+        }
+    };
+
+const handlePieChartClick = (event, elements) => {
+        // CORREÇÃO: O Chart.js envia (event, elements).
+        // Aqui garantimos que pegamos o array correto, seja ele o segundo argumento ou o primeiro (fallback).
+        const activeElements = elements || (Array.isArray(event) ? event : []);
+
+        // CORREÇÃO DE ERRO: "elements[0] is undefined"
+        // Se não houver elementos clicados (clique no fundo branco) ou o array for vazio, paramos.
+        if (!activeElements || activeElements.length === 0) return;
+
+        const { index } = activeElements[0];
         const clickedLabel = displayData.imDisplay.tiposChart.labels[index];
         if (!clickedLabel) return;
     
         const usersOfType = liveFeedData.filter(item => {
-            // Normaliza o tipo do item para bater com o rótulo do gráfico
             let itemType = item.userType;
-            
-            // Se for nulo, vazio ou "N/A" (como vem do backend), trata como "Não categorizado"
             if (!itemType || itemType === 'N/A' || itemType.trim() === '') {
                 itemType = 'Não categorizado';
             }
-            
             return itemType === clickedLabel && 
                    (item.app_status !== 'Não encontrado' || item.divergenceCode === 'ACCESS_NOT_GRANTED');
         });
@@ -646,7 +764,14 @@ function VisaoGeral() {
                 <Grid container spacing={3} sx={{ mb: 3 }}>
                     <Grid item xs={12} lg={7}>
                         {displayData && (
-                            <Painel imDisplay={displayData.imDisplay} onPieChartClick={handlePieChartClick} onPlatformChange={handlePlatformChange} selectedPlatform={plataformaSelecionada} />
+                            <Painel 
+                                imDisplay={displayData.imDisplay} 
+                                onPieChartClick={handlePieChartClick} 
+                                onPlatformChange={handlePlatformChange} 
+                                selectedPlatform={plataformaSelecionada}
+                                divergenceChart={divergenceChartData}
+                                onDivergenceChartClick={handleDivergenceChartClick}
+                            />
                         )}
                     </Grid>
                     

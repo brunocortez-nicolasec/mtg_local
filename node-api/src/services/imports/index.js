@@ -148,14 +148,57 @@ const fetchDataFromDatabase = async (dbConfig, tableName) => {
     }
 };
 
-// --- HELPER DE API (REST / SOAP) ---
+// --- HELPER PARA OBTER TOKEN DINÂMICO (OAuth2 Flow) ---
+const getDynamicToken = async (config) => {
+    const { auth_token_url, auth_client_id, auth_client_secret, auth_grant_type, auth_scope } = config;
+    
+    if (!auth_token_url || !auth_client_id) {
+        throw new Error("Configuração de Token Dinâmico incompleta (URL ou Client ID ausentes).");
+    }
+
+    try {
+        const payload = new URLSearchParams({
+            client_id: auth_client_id,
+            client_secret: auth_client_secret || "",
+            grant_type: auth_grant_type || "client_credentials",
+            scope: auth_scope || ""
+        });
+
+        const response = await axios.post(auth_token_url, payload.toString(), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+
+        const token = response.data.access_token || response.data.token;
+        if (!token) throw new Error("Token não encontrado na resposta de autenticação.");
+        
+        return token;
+    } catch (error) {
+        const msg = error.response ? JSON.stringify(error.response.data) : error.message;
+        throw new Error(`Falha na obtenção do Token Dinâmico: ${msg}`);
+    }
+};
+
+// --- HELPER DE API (REST / SOAP) ATUALIZADO ---
 const fetchDataFromApi = async (config) => {
-    const { api_url, api_method, api_headers, api_body, api_response_path } = config;
+    const { 
+        api_url, api_method, api_headers, api_body, api_response_path,
+        auth_is_dynamic // Flag para saber se precisamos buscar token antes
+    } = config;
 
     if (!api_url) throw new Error("URL da API não configurada.");
 
-    // Prepara Headers (vem do banco como JSON Object)
-    const headers = api_headers || {};
+    // 1. Prepara Headers Iniciais
+    let headers = api_headers || {};
+    
+    // 2. Se for Auth Dinâmica, busca o token e injeta no header
+    if (auth_is_dynamic) {
+        try {
+            const dynamicToken = await getDynamicToken(config);
+            headers['Authorization'] = `Bearer ${dynamicToken}`;
+        } catch (authError) {
+            throw new Error(`Erro de Autenticação Dinâmica: ${authError.message}`);
+        }
+    }
     
     const reqConfig = {
         method: api_method || 'GET',
@@ -182,7 +225,7 @@ const fetchDataFromApi = async (config) => {
             }
         }
 
-        // Navegação pelo Response Path (ex: data.users)
+        // Navegação pelo Response Path (ex: data.users ou soap:Envelope.Body...)
         if (api_response_path) {
             const pathParts = api_response_path.split('.');
             let current = finalData;
@@ -211,6 +254,8 @@ const fetchDataFromApi = async (config) => {
                 dataArray = [finalData];
             }
         } else {
+            // Se chegou aqui, provavelmente o response path estava errado ou não retornou dados úteis
+            if (!finalData) throw new Error("O caminho de resposta (Response Path) não retornou dados.");
             throw new Error("A resposta da API não contém uma lista de dados válida.");
         }
 
@@ -436,6 +481,7 @@ const processAndSaveData_Recursos = async (db, systemId, rows, mapeamento) => {
 // 3. CONTROLADORES (ROTAS)
 // ===========================================================================
 
+// ... (getImportHistory e deleteImportLog mantidos) ...
 const getImportHistory = async (req, res) => {
   try {
     const userIdInt = parseInt(req.user.id, 10);
@@ -465,257 +511,256 @@ const deleteImportLog = async (req, res) => {
   }
 };
 
-// ROTA A: PROCESSAMENTO DE DIRETÓRIO (CSV NO SERVIDOR)
+// ... (handleDirectoryProcess e handleDatabaseSync mantidos) ...
 const handleDirectoryProcess = async (req, res) => {
-  const user = req.user;
-  const { dataSourceId, processingTarget } = req.body; 
-
-  if (!user || !dataSourceId || !processingTarget) return res.status(400).json({ message: "Dados incompletos." });
-
-  const dataSource = await prisma.dataSource.findFirst({
-    where: { id: parseInt(dataSourceId), userId: parseInt(user.id) },
-    include: { hrConfig: true, systemConfig: { include: { system: true } }, mappingRH: true, mappingSystem: true }
-  });
-
-  if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
-
-  let isTargetFile = dataSource.type_datasource === 'CSV'; 
-  if (dataSource.origem_datasource === 'SISTEMA') {
-      const config = dataSource.systemConfig;
-      if (processingTarget === 'CONTAS' && config?.tipo_fonte_contas === 'CSV') isTargetFile = true;
-      else if (processingTarget === 'RECURSOS' && config?.tipo_fonte_recursos === 'CSV') isTargetFile = true;
-      else isTargetFile = false; 
-  }
-  if (!isTargetFile) {
-      return res.status(400).json({ message: "A fonte selecionada está configurada como Banco de Dados/API." });
-  }
-
-  const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
-  const importLog = await prisma.importLog.create({
-    data: { fileName: "Lendo Diretório...", status: "PENDING", userId: parseInt(user.id), dataSourceId: dataSource.id, processingTarget: logTarget },
-  });
-
-  try {
-    let diretorio = null;
-    let delimiter = ",";
-    let quote = '"';
-
-    if (dataSource.origem_datasource === 'RH') {
-        diretorio = dataSource.hrConfig?.diretorio_hr;
-        delimiter = dataSource.hrConfig?.csv_delimiter || ",";
-        quote = dataSource.hrConfig?.csv_quote || '"';
-    } else if (dataSource.origem_datasource === 'SISTEMA') {
-        const sysConfig = dataSource.systemConfig;
-        diretorio = processingTarget === 'CONTAS' ? sysConfig?.diretorio_contas : sysConfig?.diretorio_recursos;
-        delimiter = sysConfig?.csv_delimiter || ",";
-        quote = sysConfig?.csv_quote || '"';
-    }
-
-    if (!diretorio) throw new Error("Diretório não configurado.");
-
-    const fullCsvPath = await findSingleCsvInDir(diretorio);
-    const fileName = path.basename(fullCsvPath);
+    /* Lógica original mantida para brevidade */
+    /* ... (implementação original de CSV) ... */
+    const user = req.user;
+    const { dataSourceId, processingTarget } = req.body; 
     
-    await prisma.importLog.update({ where: { id: importLog.id }, data: { fileName: fileName } });
+    if (!user || !dataSourceId || !processingTarget) return res.status(400).json({ message: "Dados incompletos." });
 
-    const fileContent = await fs.promises.readFile(fullCsvPath, "utf8");
-    
-    const parsedCsv = Papa.parse(fileContent, { 
-        header: true, 
-        skipEmptyLines: true,
-        delimiter: delimiter,
-        quoteChar: quote
+    const dataSource = await prisma.dataSource.findFirst({
+        where: { id: parseInt(dataSourceId), userId: parseInt(user.id) },
+        include: { hrConfig: true, systemConfig: { include: { system: true } }, mappingRH: true, mappingSystem: true }
     });
-    const rows = parsedCsv.data;
 
-    if (!rows.length) throw new Error("O arquivo CSV está vazio ou não pôde ser lido com o delimitador configurado.");
-    
-    // Validação Dinâmica de Colunas (CSV)
-    if (dataSource.origem_datasource === 'SISTEMA' && processingTarget === 'CONTAS' && rows.length > 0) {
-        const requiredMappings = ['accounts_id_in_system', 'accounts_email', 'accounts_identity_id', 'accounts_resource_name'];
-        const availableKeys = Object.keys(rows[0] || {});
-        
-        let missingSourceCol = null;
-        for (const appField of requiredMappings) {
-            const sourceCol = dataSource.mappingSystem?.[appField];
-            if (sourceCol && !availableKeys.includes(sourceCol)) {
-                missingSourceCol = { appField, sourceCol };
-                break;
-            }
-        }
+    if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
 
-        if (missingSourceCol) {
-            throw new Error(`COLUNA CRÍTICA AUSENTE: O campo obrigatório '${missingSourceCol.appField}' (mapeado para '${missingSourceCol.sourceCol}') não foi encontrado. Verifique se o Delimitador CSV está correto.`);
-        }
+    let isTargetFile = dataSource.type_datasource === 'CSV'; 
+    if (dataSource.origem_datasource === 'SISTEMA') {
+        const config = dataSource.systemConfig;
+        if (processingTarget === 'CONTAS' && config?.tipo_fonte_contas === 'CSV') isTargetFile = true;
+        else if (processingTarget === 'RECURSOS' && config?.tipo_fonte_recursos === 'CSV') isTargetFile = true;
+        else isTargetFile = false; 
+    }
+    if (!isTargetFile) {
+        return res.status(400).json({ message: "A fonte selecionada está configurada como Banco de Dados/API." });
     }
 
-    await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
-
-    let processFunction = null;
-    let mapeamento = null;
-    let systemId = null;
-    let resourceCache = new Map();
-
-    switch (dataSource.origem_datasource) {
-        case "RH":
-            mapeamento = dataSource.mappingRH;
-            processFunction = (db, r) => processAndSaveData_RH(db, dataSource.id, r, mapeamento);
-            break;
-        case "SISTEMA":
-            systemId = dataSource.systemConfig.systemId;
-            mapeamento = dataSource.mappingSystem;
-            if (processingTarget === "CONTAS") {
-                const resources = await prisma.resource.findMany({ where: { systemId }, select: { id: true, name_resource: true } });
-                resourceCache = new Map(resources.map(r => [r.name_resource.trim(), r.id]));
-                processFunction = (db, r) => processAndSaveData_Contas(db, systemId, r, mapeamento, resourceCache);
-            } else {
-                processFunction = (db, r) => processAndSaveData_Recursos(db, systemId, r, mapeamento);
-            }
-            break;
-    }
-
-    const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
-
-    const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
-    const finishedLog = await prisma.importLog.update({
-        where: { id: importLog.id },
-        data: { 
-            status: hasErrors ? "FAILED" : "SUCCESS", 
-            processedRows: processedCount, 
-            completedAt: new Date(), 
-            errorDetails: warningsOrErrors.length > 0 ? warningsOrErrors.join('\n') : null 
-        }
+    const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
+    const importLog = await prisma.importLog.create({
+        data: { fileName: "Lendo Diretório...", status: "PENDING", userId: parseInt(user.id), dataSourceId: dataSource.id, processingTarget: logTarget },
     });
-    return res.status(201).json(finishedLog);
 
-  } catch (error) {
-    await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "FAILED", errorDetails: error.message, completedAt: new Date() } });
-    return res.status(500).json({ message: error.message });
-  }
-};
+    try {
+        let diretorio = null;
+        let delimiter = ",";
+        let quote = '"';
 
-// ROTA B: PROCESSAMENTO DE BANCO DE DADOS (SYNC)
-const handleDatabaseSync = async (req, res) => {
-  const user = req.user;
-  const { dataSourceId, processingTarget } = req.body; 
+        if (dataSource.origem_datasource === 'RH') {
+            diretorio = dataSource.hrConfig?.diretorio_hr;
+            delimiter = dataSource.hrConfig?.csv_delimiter || ",";
+            quote = dataSource.hrConfig?.csv_quote || '"';
+        } else if (dataSource.origem_datasource === 'SISTEMA') {
+            const sysConfig = dataSource.systemConfig;
+            diretorio = processingTarget === 'CONTAS' ? sysConfig?.diretorio_contas : sysConfig?.diretorio_recursos;
+            delimiter = sysConfig?.csv_delimiter || ",";
+            quote = sysConfig?.csv_quote || '"';
+        }
 
-  if (!user || !dataSourceId || !processingTarget) return res.status(400).json({ message: "Dados incompletos." });
+        if (!diretorio) throw new Error("Diretório não configurado.");
 
-  const dataSource = await prisma.dataSource.findFirst({
-    where: { id: parseInt(dataSourceId), userId: parseInt(user.id) },
-    include: { hrConfig: true, systemConfig: { include: { system: true } }, mappingRH: true, mappingSystem: true }
-  });
-
-  if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
-
-  let isTargetDatabase = dataSource.type_datasource === 'DATABASE'; 
-  if (dataSource.origem_datasource === 'SISTEMA') {
-      const config = dataSource.systemConfig;
-      if (processingTarget === 'CONTAS' && config?.tipo_fonte_contas === 'DATABASE') isTargetDatabase = true;
-      else if (processingTarget === 'RECURSOS' && config?.tipo_fonte_recursos === 'DATABASE') isTargetDatabase = true;
-      else isTargetDatabase = false; 
-  }
-  if (!isTargetDatabase) {
-      return res.status(400).json({ message: "A fonte selecionada está configurada como Arquivo/API." });
-  }
-
-  const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
-  const importLog = await prisma.importLog.create({
-    data: { fileName: "Conectando ao Banco...", status: "PENDING", userId: parseInt(user.id), dataSourceId: dataSource.id, processingTarget: logTarget },
-  });
-
-  try {
-    let dbConfig = null;
-    let tableName = null;
-
-    if (dataSource.origem_datasource === 'RH') {
-        dbConfig = dataSource.hrConfig;
-        tableName = dbConfig.db_table;
-    } else if (dataSource.origem_datasource === 'SISTEMA') {
-        dbConfig = dataSource.systemConfig;
-        tableName = processingTarget === 'CONTAS' ? dbConfig.diretorio_contas : dbConfig.diretorio_recursos;
-    }
-
-    if (!tableName) throw new Error("Nome da tabela não configurado.");
-
-    await prisma.importLog.update({ where: { id: importLog.id }, data: { fileName: `Tabela: ${tableName}` } });
-
-    // --- AQUI ACONTECE A MÁGICA HÍBRIDA (Oracle/Postgres) ---
-    const rows = await fetchDataFromDatabase(dbConfig, tableName);
-    
-    if (!rows.length) throw new Error("A tabela está vazia.");
-
-    // Validação Dinâmica de Colunas (Para Banco)
-    if (dataSource.origem_datasource === 'SISTEMA' && processingTarget === 'CONTAS' && rows.length > 0) {
-        const requiredMappings = ['accounts_id_in_system', 'accounts_email', 'accounts_identity_id', 'accounts_resource_name'];
-        const availableKeys = Object.keys(rows[0] || {});
+        const fullCsvPath = await findSingleCsvInDir(diretorio);
+        const fileName = path.basename(fullCsvPath);
         
-        let missingSourceCol = null;
-        for (const appField of requiredMappings) {
-            const sourceCol = dataSource.mappingSystem?.[appField];
+        await prisma.importLog.update({ where: { id: importLog.id }, data: { fileName: fileName } });
+
+        const fileContent = await fs.promises.readFile(fullCsvPath, "utf8");
+        
+        const parsedCsv = Papa.parse(fileContent, { 
+            header: true, 
+            skipEmptyLines: true,
+            delimiter: delimiter,
+            quoteChar: quote
+        });
+        const rows = parsedCsv.data;
+
+        if (!rows.length) throw new Error("O arquivo CSV está vazio ou não pôde ser lido com o delimitador configurado.");
+        
+        // Validação Dinâmica de Colunas (CSV)
+        if (dataSource.origem_datasource === 'SISTEMA' && processingTarget === 'CONTAS' && rows.length > 0) {
+            const requiredMappings = ['accounts_id_in_system', 'accounts_email', 'accounts_identity_id', 'accounts_resource_name'];
+            const availableKeys = Object.keys(rows[0] || {});
             
-            // Check robusto: Verifica exato OU UpperCase (Oracle)
-            if (sourceCol) {
-                const exists = availableKeys.includes(sourceCol) || availableKeys.includes(sourceCol.toUpperCase());
-                if (!exists) {
+            let missingSourceCol = null;
+            for (const appField of requiredMappings) {
+                const sourceCol = dataSource.mappingSystem?.[appField];
+                if (sourceCol && !availableKeys.includes(sourceCol)) {
                     missingSourceCol = { appField, sourceCol };
                     break;
                 }
             }
-        }
 
-        if (missingSourceCol) {
-            throw new Error(`COLUNA CRÍTICA AUSENTE: O campo obrigatório '${missingSourceCol.appField}' (mapeado para '${missingSourceCol.sourceCol}') não foi encontrado na tabela.`);
-        }
-    }
-
-    await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
-
-    // 2. Define qual função chamar
-    let processFunction = null;
-    let mapeamento = null;
-    let systemId = null;
-    let resourceCache = new Map();
-
-    switch (dataSource.origem_datasource) {
-        case "RH":
-            mapeamento = dataSource.mappingRH;
-            processFunction = (db, r) => processAndSaveData_RH(db, dataSource.id, r, mapeamento);
-            break;
-        case "SISTEMA":
-            systemId = dataSource.systemConfig.systemId;
-            mapeamento = dataSource.mappingSystem;
-            if (processingTarget === "CONTAS") {
-                const resources = await prisma.resource.findMany({ where: { systemId }, select: { id: true, name_resource: true } });
-                resourceCache = new Map(resources.map(r => [r.name_resource.trim(), r.id]));
-                processFunction = (db, r) => processAndSaveData_Contas(db, systemId, r, mapeamento, resourceCache);
-            } else {
-                processFunction = (db, r) => processAndSaveData_Recursos(db, systemId, r, mapeamento);
+            if (missingSourceCol) {
+                throw new Error(`COLUNA CRÍTICA AUSENTE: O campo obrigatório '${missingSourceCol.appField}' (mapeado para '${missingSourceCol.sourceCol}') não foi encontrado. Verifique se o Delimitador CSV está correto.`);
             }
-            break;
-    }
-
-    const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
-
-    const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
-    const finishedLog = await prisma.importLog.update({
-        where: { id: importLog.id },
-        data: { 
-            status: hasErrors ? "FAILED" : "SUCCESS", 
-            processedRows: processedCount, 
-            completedAt: new Date(), 
-            errorDetails: warningsOrErrors.length > 0 ? warningsOrErrors.join('\n') : null 
         }
-    });
-    return res.status(201).json(finishedLog);
 
-  } catch (error) {
-    await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "FAILED", errorDetails: error.message, completedAt: new Date() } });
-    return res.status(500).json({ message: error.message });
-  }
+        await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
+
+        let processFunction = null;
+        let mapeamento = null;
+        let systemId = null;
+        let resourceCache = new Map();
+
+        switch (dataSource.origem_datasource) {
+            case "RH":
+                mapeamento = dataSource.mappingRH;
+                processFunction = (db, r) => processAndSaveData_RH(db, dataSource.id, r, mapeamento);
+                break;
+            case "SISTEMA":
+                systemId = dataSource.systemConfig.systemId;
+                mapeamento = dataSource.mappingSystem;
+                if (processingTarget === "CONTAS") {
+                    const resources = await prisma.resource.findMany({ where: { systemId }, select: { id: true, name_resource: true } });
+                    resourceCache = new Map(resources.map(r => [r.name_resource.trim(), r.id]));
+                    processFunction = (db, r) => processAndSaveData_Contas(db, systemId, r, mapeamento, resourceCache);
+                } else {
+                    processFunction = (db, r) => processAndSaveData_Recursos(db, systemId, r, mapeamento);
+                }
+                break;
+        }
+
+        const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
+
+        const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
+        const finishedLog = await prisma.importLog.update({
+            where: { id: importLog.id },
+            data: { 
+                status: hasErrors ? "FAILED" : "SUCCESS", 
+                processedRows: processedCount, 
+                completedAt: new Date(), 
+                errorDetails: warningsOrErrors.length > 0 ? warningsOrErrors.join('\n') : null 
+            }
+        });
+        return res.status(201).json(finishedLog);
+
+    } catch (error) {
+        await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "FAILED", errorDetails: error.message, completedAt: new Date() } });
+        return res.status(500).json({ message: error.message });
+    }
 };
 
-// --- NOVO: ROTA DE PROCESSAMENTO DE API (SYNC) ---
+const handleDatabaseSync = async (req, res) => {
+    /* Lógica original mantida para brevidade */
+    /* ... (implementação original de Sync DB) ... */
+    const user = req.user;
+    const { dataSourceId, processingTarget } = req.body; 
+
+    if (!user || !dataSourceId || !processingTarget) return res.status(400).json({ message: "Dados incompletos." });
+
+    const dataSource = await prisma.dataSource.findFirst({
+        where: { id: parseInt(dataSourceId), userId: parseInt(user.id) },
+        include: { hrConfig: true, systemConfig: { include: { system: true } }, mappingRH: true, mappingSystem: true }
+    });
+
+    if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
+
+    let isTargetDatabase = dataSource.type_datasource === 'DATABASE'; 
+    if (dataSource.origem_datasource === 'SISTEMA') {
+        const config = dataSource.systemConfig;
+        if (processingTarget === 'CONTAS' && config?.tipo_fonte_contas === 'DATABASE') isTargetDatabase = true;
+        else if (processingTarget === 'RECURSOS' && config?.tipo_fonte_recursos === 'DATABASE') isTargetDatabase = true;
+        else isTargetDatabase = false; 
+    }
+    if (!isTargetDatabase) {
+        return res.status(400).json({ message: "A fonte selecionada está configurada como Arquivo/API." });
+    }
+
+    const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
+    const importLog = await prisma.importLog.create({
+        data: { fileName: "Conectando ao Banco...", status: "PENDING", userId: parseInt(user.id), dataSourceId: dataSource.id, processingTarget: logTarget },
+    });
+
+    try {
+        let dbConfig = null;
+        let tableName = null;
+
+        if (dataSource.origem_datasource === 'RH') {
+            dbConfig = dataSource.hrConfig;
+            tableName = dbConfig.db_table;
+        } else if (dataSource.origem_datasource === 'SISTEMA') {
+            dbConfig = dataSource.systemConfig;
+            tableName = processingTarget === 'CONTAS' ? dbConfig.diretorio_contas : dbConfig.diretorio_recursos;
+        }
+
+        if (!tableName) throw new Error("Nome da tabela não configurado.");
+
+        await prisma.importLog.update({ where: { id: importLog.id }, data: { fileName: `Tabela: ${tableName}` } });
+
+        const rows = await fetchDataFromDatabase(dbConfig, tableName);
+        
+        if (!rows.length) throw new Error("A tabela está vazia.");
+
+        // Validação Dinâmica de Colunas (Para Banco)
+        if (dataSource.origem_datasource === 'SISTEMA' && processingTarget === 'CONTAS' && rows.length > 0) {
+            const requiredMappings = ['accounts_id_in_system', 'accounts_email', 'accounts_identity_id', 'accounts_resource_name'];
+            const availableKeys = Object.keys(rows[0] || {});
+            
+            let missingSourceCol = null;
+            for (const appField of requiredMappings) {
+                const sourceCol = dataSource.mappingSystem?.[appField];
+                if (sourceCol) {
+                    const exists = availableKeys.includes(sourceCol) || availableKeys.includes(sourceCol.toUpperCase());
+                    if (!exists) {
+                        missingSourceCol = { appField, sourceCol };
+                        break;
+                    }
+                }
+            }
+
+            if (missingSourceCol) {
+                throw new Error(`COLUNA CRÍTICA AUSENTE: O campo obrigatório '${missingSourceCol.appField}' (mapeado para '${missingSourceCol.sourceCol}') não foi encontrado na tabela.`);
+            }
+        }
+
+        await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
+
+        let processFunction = null;
+        let mapeamento = null;
+        let systemId = null;
+        let resourceCache = new Map();
+
+        switch (dataSource.origem_datasource) {
+            case "RH":
+                mapeamento = dataSource.mappingRH;
+                processFunction = (db, r) => processAndSaveData_RH(db, dataSource.id, r, mapeamento);
+                break;
+            case "SISTEMA":
+                systemId = dataSource.systemConfig.systemId;
+                mapeamento = dataSource.mappingSystem;
+                if (processingTarget === "CONTAS") {
+                    const resources = await prisma.resource.findMany({ where: { systemId }, select: { id: true, name_resource: true } });
+                    resourceCache = new Map(resources.map(r => [r.name_resource.trim(), r.id]));
+                    processFunction = (db, r) => processAndSaveData_Contas(db, systemId, r, mapeamento, resourceCache);
+                } else {
+                    processFunction = (db, r) => processAndSaveData_Recursos(db, systemId, r, mapeamento);
+                }
+                break;
+        }
+
+        const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
+
+        const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
+        const finishedLog = await prisma.importLog.update({
+            where: { id: importLog.id },
+            data: { 
+                status: hasErrors ? "FAILED" : "SUCCESS", 
+                processedRows: processedCount, 
+                completedAt: new Date(), 
+                errorDetails: warningsOrErrors.length > 0 ? warningsOrErrors.join('\n') : null 
+            }
+        });
+        return res.status(201).json(finishedLog);
+
+    } catch (error) {
+        await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "FAILED", errorDetails: error.message, completedAt: new Date() } });
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+// --- NOVO: ROTA DE PROCESSAMENTO DE API (SYNC) ATUALIZADA ---
 const handleApiSync = async (req, res) => {
   const user = req.user;
   const { dataSourceId, processingTarget } = req.body; 
@@ -746,7 +791,6 @@ const handleApiSync = async (req, res) => {
   try {
     let apiConfig = {};
     
-    // Monta a config para o Helper
     if (dataSource.origem_datasource === 'RH') {
         const c = dataSource.hrConfig;
         apiConfig = {
@@ -754,7 +798,14 @@ const handleApiSync = async (req, res) => {
             api_method: c.api_method,
             api_headers: c.api_headers,
             api_body: c.api_body,
-            api_response_path: c.api_response_path
+            api_response_path: c.api_response_path,
+            // Novos campos para o Helper
+            auth_is_dynamic: c.auth_is_dynamic,
+            auth_token_url: c.auth_token_url,
+            auth_client_id: c.auth_client_id,
+            auth_client_secret: c.auth_client_secret,
+            auth_grant_type: c.auth_grant_type,
+            auth_scope: c.auth_scope
         };
     } else {
         const c = dataSource.systemConfig;
@@ -766,19 +817,26 @@ const handleApiSync = async (req, res) => {
             api_method: c.api_method,
             api_headers: c.api_headers,
             api_body: c.api_body,
-            api_response_path: c.api_response_path
+            api_response_path: c.api_response_path,
+            // Novos campos
+            auth_is_dynamic: c.auth_is_dynamic,
+            auth_token_url: c.auth_token_url,
+            auth_client_id: c.auth_client_id,
+            auth_client_secret: c.auth_client_secret,
+            auth_grant_type: c.auth_grant_type,
+            auth_scope: c.auth_scope
         };
     }
 
     await prisma.importLog.update({ where: { id: importLog.id }, data: { fileName: `API: ${apiConfig.api_url}` } });
 
-    // Busca dados via Axios/XML2JS
+    // Busca dados via Axios/XML2JS (Helper atualizado)
     const rows = await fetchDataFromApi(apiConfig);
     
     if (!rows.length) throw new Error("A API retornou uma lista vazia.");
     await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
 
-    // Processamento igual ao DB/CSV
+    // Processamento
     let processFunction, mapeamento, systemId, resourceCache = new Map();
     if(dataSource.origem_datasource === 'RH') {
         mapeamento = dataSource.mappingRH;
@@ -811,88 +869,89 @@ const handleApiSync = async (req, res) => {
 
 // ROTA C: UPLOAD MANUAL (LEGADO)
 const handleUploadProcess = async (req, res) => {
-  const user = req.user;
-  const { dataSourceId, processingTarget } = req.body; 
-  const file = req.file;
+    /* Lógica original mantida para brevidade */
+    /* ... (implementação original de Upload) ... */
+    const user = req.user;
+    const { dataSourceId, processingTarget } = req.body; 
+    const file = req.file;
 
-  if (!user || !dataSourceId || !file) return res.status(400).json({ message: "Dados incompletos." });
-  
-  const dataSource = await prisma.dataSource.findFirst({
-    where: { id: parseInt(dataSourceId), userId: parseInt(user.id) },
-    include: { hrConfig: true, systemConfig: { include: { system: true } }, mappingRH: true, mappingSystem: true }
-  });
-  if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
-
-  const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
-  const importLog = await prisma.importLog.create({
-    data: { fileName: file.originalname, status: "PENDING", userId: parseInt(user.id), dataSourceId: dataSource.id, processingTarget: logTarget },
-  });
-
-  try {
-    const fileContent = file.buffer.toString("utf8");
+    if (!user || !dataSourceId || !file) return res.status(400).json({ message: "Dados incompletos." });
     
-    // Busca config de delimitador (se disponível)
-    let delimiter = ",";
-    let quote = '"';
-    if (dataSource.origem_datasource === 'RH') {
-         delimiter = dataSource.hrConfig?.csv_delimiter || ",";
-         quote = dataSource.hrConfig?.csv_quote || '"';
-    } else if (dataSource.origem_datasource === 'SISTEMA') {
-         delimiter = dataSource.systemConfig?.csv_delimiter || ",";
-         quote = dataSource.systemConfig?.csv_quote || '"';
-    }
-
-    const parsedCsv = Papa.parse(fileContent, { 
-        header: true, 
-        skipEmptyLines: true,
-        delimiter: delimiter,
-        quoteChar: quote
+    const dataSource = await prisma.dataSource.findFirst({
+        where: { id: parseInt(dataSourceId), userId: parseInt(user.id) },
+        include: { hrConfig: true, systemConfig: { include: { system: true } }, mappingRH: true, mappingSystem: true }
     });
-    const rows = parsedCsv.data;
-    
-    let processFunction = null;
-    let mapeamento = null;
-    let systemId = null;
-    let resourceCache = new Map();
+    if (!dataSource) return res.status(404).json({ message: "Fonte não encontrada." });
 
-    switch (dataSource.origem_datasource) {
-        case "RH":
-            mapeamento = dataSource.mappingRH;
-            processFunction = (db, r) => processAndSaveData_RH(db, dataSource.id, r, mapeamento);
-            break;
-        case "SISTEMA":
-            systemId = dataSource.systemConfig.systemId;
-            mapeamento = dataSource.mappingSystem;
-            if (processingTarget === "CONTAS") {
-                const resources = await prisma.resource.findMany({ where: { systemId }, select: { id: true, name_resource: true } });
-                resourceCache = new Map(resources.map(r => [r.name_resource.trim(), r.id]));
-                processFunction = (db, r) => processAndSaveData_Contas(db, systemId, r, mapeamento, resourceCache);
-            } else {
-                processFunction = (db, r) => processAndSaveData_Recursos(db, systemId, r, mapeamento);
-            }
-            break;
-    }
+    const logTarget = dataSource.origem_datasource === 'SISTEMA' ? processingTarget : dataSource.origem_datasource;
+    const importLog = await prisma.importLog.create({
+        data: { fileName: file.originalname, status: "PENDING", userId: parseInt(user.id), dataSourceId: dataSource.id, processingTarget: logTarget },
+    });
 
-    await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
-    
-    const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
-
-    const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
-    const finishedLog = await prisma.importLog.update({
-        where: { id: importLog.id },
-        data: { 
-            status: hasErrors ? "FAILED" : "SUCCESS", 
-            processedRows: processedCount, 
-            completedAt: new Date(), 
-            errorDetails: warningsOrErrors.length > 0 ? warningsOrErrors.join('\n') : null 
+    try {
+        const fileContent = file.buffer.toString("utf8");
+        
+        let delimiter = ",";
+        let quote = '"';
+        if (dataSource.origem_datasource === 'RH') {
+             delimiter = dataSource.hrConfig?.csv_delimiter || ",";
+             quote = dataSource.hrConfig?.csv_quote || '"';
+        } else if (dataSource.origem_datasource === 'SISTEMA') {
+             delimiter = dataSource.systemConfig?.csv_delimiter || ",";
+             quote = dataSource.systemConfig?.csv_quote || '"';
         }
-    });
-    return res.status(201).json(finishedLog);
 
-  } catch (error) {
-      await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "FAILED", errorDetails: error.message, completedAt: new Date() } });
-      return res.status(500).json({ message: error.message });
-  }
+        const parsedCsv = Papa.parse(fileContent, { 
+            header: true, 
+            skipEmptyLines: true,
+            delimiter: delimiter,
+            quoteChar: quote
+        });
+        const rows = parsedCsv.data;
+        
+        let processFunction = null;
+        let mapeamento = null;
+        let systemId = null;
+        let resourceCache = new Map();
+
+        switch (dataSource.origem_datasource) {
+            case "RH":
+                mapeamento = dataSource.mappingRH;
+                processFunction = (db, r) => processAndSaveData_RH(db, dataSource.id, r, mapeamento);
+                break;
+            case "SISTEMA":
+                systemId = dataSource.systemConfig.systemId;
+                mapeamento = dataSource.mappingSystem;
+                if (processingTarget === "CONTAS") {
+                    const resources = await prisma.resource.findMany({ where: { systemId }, select: { id: true, name_resource: true } });
+                    resourceCache = new Map(resources.map(r => [r.name_resource.trim(), r.id]));
+                    processFunction = (db, r) => processAndSaveData_Contas(db, systemId, r, mapeamento, resourceCache);
+                } else {
+                    processFunction = (db, r) => processAndSaveData_Recursos(db, systemId, r, mapeamento);
+                }
+                break;
+        }
+
+        await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "PROCESSING", totalRows: rows.length } });
+        
+        const { processedCount, warningsOrErrors } = await processFunction(prisma, rows);
+
+        const hasErrors = warningsOrErrors.some(msg => msg.includes("IGNORADA"));
+        const finishedLog = await prisma.importLog.update({
+            where: { id: importLog.id },
+            data: { 
+                status: hasErrors ? "FAILED" : "SUCCESS", 
+                processedRows: processedCount, 
+                completedAt: new Date(), 
+                errorDetails: warningsOrErrors.length > 0 ? warningsOrErrors.join('\n') : null 
+            }
+        });
+        return res.status(201).json(finishedLog);
+
+    } catch (error) {
+         await prisma.importLog.update({ where: { id: importLog.id }, data: { status: "FAILED", errorDetails: error.message, completedAt: new Date() } });
+         return res.status(500).json({ message: error.message });
+    }
 };
 
 

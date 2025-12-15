@@ -124,7 +124,11 @@ const createDataSource = async (req, res) => {
     // Campos CSV:
     csv_delimiter, csv_quote,
     // Campos API (NOVO):
-    api_url, api_method, api_headers, api_body, api_response_path
+    api_url, api_method, api_headers, api_body, api_response_path,
+    // Campos API AVANÇADO (NOVO):
+    api_subtype, api_auth_type, api_auth_user, api_auth_password, api_auth_token,
+    // Campos AUTH DINÂMICA (NOVO):
+    auth_is_dynamic, auth_token_url, auth_client_id, auth_client_secret, auth_grant_type, auth_scope
   } = req.body;
 
   const data = {
@@ -187,13 +191,26 @@ const createDataSource = async (req, res) => {
           csv_quote: csv_quote || '"'
       };
 
-      // Objeto de configuração de API reutilizável (NOVO)
+      // Objeto de configuração de API reutilizável (ATUALIZADO)
       const apiConfig = {
           api_url, 
           api_method: api_method || 'GET', 
           api_headers, 
           api_body, 
-          api_response_path
+          api_response_path,
+          // Novos Campos
+          api_subtype: api_subtype || 'REST',
+          api_auth_type: api_auth_type || 'No Auth',
+          api_auth_user,
+          api_auth_password,
+          api_auth_token,
+          // Auth Dinamica
+          auth_is_dynamic: auth_is_dynamic === true, // Garante boleano
+          auth_token_url,
+          auth_client_id,
+          auth_client_secret,
+          auth_grant_type,
+          auth_scope
       };
 
       switch (data.origem_datasource) {
@@ -204,7 +221,7 @@ const createDataSource = async (req, res) => {
               diretorio_hr: diretorio, 
               ...dbConfig,
               ...csvConfig,
-              ...apiConfig // Salva config API
+              ...apiConfig // Salva config API completa
             }
           });
           break;
@@ -249,7 +266,7 @@ const createDataSource = async (req, res) => {
               diretorio_recursos: diretorio_recursos,
               ...dbConfig,
               ...csvConfig,
-              ...apiConfig // Salva config API
+              ...apiConfig // Salva config API completa
             }
           });
           break;
@@ -306,7 +323,11 @@ const updateDataSource = async (req, res) => {
     // Campos CSV
     csv_delimiter, csv_quote,
     // Campos API (NOVO)
-    api_url, api_method, api_headers, api_body, api_response_path
+    api_url, api_method, api_headers, api_body, api_response_path,
+    // Campos API AVANÇADO (NOVO):
+    api_subtype, api_auth_type, api_auth_user, api_auth_password, api_auth_token,
+    // Campos AUTH DINÂMICA (NOVO):
+    auth_is_dynamic, auth_token_url, auth_client_id, auth_client_secret, auth_grant_type, auth_scope
   } = req.body;
 
   const data = {
@@ -365,13 +386,26 @@ const updateDataSource = async (req, res) => {
           csv_quote: csv_quote || '"'
       };
 
-      // Configuração API (NOVO)
+      // Configuração API (ATUALIZADA)
       const apiConfig = {
           api_url, 
           api_method: api_method || 'GET', 
           api_headers, 
           api_body, 
-          api_response_path
+          api_response_path,
+          // Novos
+          api_subtype: api_subtype || 'REST',
+          api_auth_type: api_auth_type || 'No Auth',
+          api_auth_user,
+          api_auth_password,
+          api_auth_token,
+          // Auth Dinamica
+          auth_is_dynamic: auth_is_dynamic === true,
+          auth_token_url,
+          auth_client_id,
+          auth_client_secret,
+          auth_grant_type,
+          auth_scope
       };
 
       switch (data.origem_datasource) {

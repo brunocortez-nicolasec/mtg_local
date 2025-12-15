@@ -13,7 +13,7 @@ function FinancialCards({ prejuizoPotencial, valorMitigado, plataformaSelecionad
   // Deixa o título do card de mitigação dinâmico
   const valorMitigadoTitle = plataformaSelecionada === 'Geral' 
     ? 'Valor Mitigado (Geral)' 
-    : `Valor Mitigado com ${plataformaSelecionada}`;
+    : `Valor Mitigado de ${plataformaSelecionada}`;
 
   return (
     <Grid item xs={12} lg={3}>

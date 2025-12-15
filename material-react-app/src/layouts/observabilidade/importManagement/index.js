@@ -1,5 +1,3 @@
-// material-react-app/src/layouts/observabilidade/importManagement/index.js
-
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { useMaterialUIController } from "context";
@@ -199,13 +197,22 @@ function ImportManagement() {
       let type = 'CSV'; // Default
 
       if (source.origem_datasource === 'RH') {
-           if (source.hrConfig?.api_url) type = 'API'; // Prioridade API
-           else if (source.hrConfig?.db_host || source.hrConfig?.db_url) type = 'DATABASE';
+           // Verifica se tem URL de API ou se foi marcado explicitamente como API
+           if ((source.hrConfig?.api_url && source.hrConfig?.api_url.length > 5) || source.type_datasource === 'API') {
+               type = 'API';
+           } else if (source.hrConfig?.db_host || source.hrConfig?.db_url) {
+               type = 'DATABASE';
+           }
       } else if (source.origem_datasource === 'SISTEMA' && source.systemConfig) {
            // Se SISTEMA, olha a config específica
-           type = processingTarget === 'CONTAS' 
+           const configType = processingTarget === 'CONTAS' 
               ? source.systemConfig.tipo_fonte_contas 
               : source.systemConfig.tipo_fonte_recursos;
+           
+           if (configType === 'API') type = 'API';
+           else if (configType === 'DATABASE') type = 'DATABASE';
+      } else if (source.origem_datasource === 'IDM') {
+           type = 'API';
       }
 
       // 3. Escolhe a URL correta (Segregada)

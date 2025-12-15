@@ -33,6 +33,11 @@ import { testApiConnection } from "./services/datasources/testApi.js";
 import path from "path";
 import * as fs from "fs";
 
+// --- NOVAS IMPORTAÇÕES PARA HTTPS ---
+import https from "https";
+import http from "http";
+// -----------------------------------
+
 // 1. Carrega as variáveis do arquivo .env
 dotenv.config();
 
@@ -128,4 +133,38 @@ app.post(
   testApiConnection
 );
 
-app.listen(PORT, () => console.log(`Server listening to port ${PORT}`));
+// Verifica se estamos em produção (Docker/Portainer) ou Local
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (!isProduction) {
+  // --- MODO LOCAL: Tenta subir HTTPS com certificados ---
+  try {
+    console.log("🔒 Inicializando modo HTTPS Local...");
+    
+    // Caminho: node-api/certs/
+    const httpsOptions = {
+      key: fs.readFileSync(path.resolve("certs", "key.pem")), 
+      cert: fs.readFileSync(path.resolve("certs", "cert.pem")), 
+    };
+
+    https.createServer(httpsOptions, app).listen(PORT, () => {
+      console.log(`✅ Servidor Local HTTPS rodando na porta ${PORT}`);
+      console.log(`🔗 Link Local: https://localhost:${PORT}`);
+      console.log(`🔗 Link Rede:  https://192.168.0.104:${PORT}`); // Ajustado para seu IP atual
+    });
+
+  } catch (error) {
+    console.error("❌ Erro ao carregar certificados SSL:", error.message);
+    console.log("⚠️ Verifique se a pasta 'certs' existe na raiz do node-api com key.pem e cert.pem");
+    console.log("⚠️ Iniciando em HTTP (Modo Inseguro)...");
+    
+    http.createServer(app).listen(PORT, () => {
+        console.log(`⚠️ Servidor rodando em HTTP na porta ${PORT}`);
+    });
+  }
+} else {
+  // --- MODO PRODUÇÃO (Portainer): Roda HTTP puro (o Nginx cuida do SSL) ---
+  app.listen(PORT, () => {
+    console.log(`🚀 Servidor Produção rodando na porta ${PORT}`);
+  });
+}

@@ -1,8 +1,5 @@
-// material-react-app/src/context/index.js
-
-import { createContext, useContext, useReducer, useMemo, useEffect } from "react";
+import { createContext, useContext, useReducer, useMemo } from "react";
 import PropTypes from "prop-types";
-import axios from "axios";
 
 const MaterialUI = createContext();
 MaterialUI.displayName = "MaterialUIContext";
@@ -12,6 +9,8 @@ function reducer(state, action) {
     // Ações de Autenticação
     case "SET_AUTH": {
       const { token, user } = action.value;
+      // Mantemos o localStorage apenas para persistência de bibliotecas de terceiros se necessário,
+      // mas a fonte da verdade agora é o Keycloak.
       if (token) {
         localStorage.setItem("token", token);
       } else {
@@ -24,7 +23,7 @@ function reducer(state, action) {
       return { ...state, token: null, user: null };
     }
 
-    // Ações de UI
+    // Ações de UI (Mantidas iguais)
     case "MINI_SIDENAV":
       return { ...state, miniSidenav: action.value };
     case "TRANSPARENT_SIDENAV":
@@ -70,24 +69,8 @@ function MaterialUIControllerProvider({ children }) {
 
   const [controller, dispatch] = useReducer(reducer, initialState);
 
-  // Efeito para carregar o token e o usuário do localStorage ao iniciar
-  useEffect(() => {
-    const initialize = async () => {
-      const storedToken = localStorage.getItem("token");
-      if (storedToken) {
-        try {
-          const response = await axios.get("/me", {
-            headers: { Authorization: `Bearer ${storedToken}` },
-          });
-          dispatch({ type: "SET_AUTH", value: { token: storedToken, user: response.data } });
-        } catch (error) {
-          console.error("Sessão inválida. Deslogando.", error);
-          dispatch({ type: "LOGOUT" });
-        }
-      }
-    };
-    initialize();
-  }, []);
+  // NOTA: O useEffect antigo de inicialização foi REMOVIDO.
+  // A sincronização agora é feita pelo KeycloakAuthMiddleware no App.js
 
   const value = useMemo(() => [controller, dispatch], [controller, dispatch]);
 

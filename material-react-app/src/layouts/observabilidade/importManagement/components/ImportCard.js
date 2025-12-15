@@ -1,5 +1,3 @@
-// material-react-app/src/layouts/observabilidade/importManagement/components/ImportCard.js
-
 import React, { useState, useEffect, useMemo } from "react";
 import PropTypes from "prop-types";
 // @mui/material components
@@ -137,35 +135,53 @@ function ImportCard({
   }, [selectedDataSource, history]);
 
 
-  // ======================= LÓGICA DE DETECÇÃO DE TIPO (ATUALIZADA) =======================
+  // ======================= LÓGICA DE DETECÇÃO DE TIPO (CORRIGIDA E MAIS ROBUSTA) =======================
   const currentSourceType = useMemo(() => {
     if (!selectedDataSource) return null;
     
     const { origem_datasource, type_datasource, hrConfig, systemConfig } = selectedDataSource;
 
-    // Prioridade 1: Campo explícito type_datasource
-    if (type_datasource === 'API') return "API";
-    if (type_datasource === 'DATABASE') return "DATABASE";
-    if (type_datasource === 'CSV') return "CSV";
-
-    // Prioridade 2: Fallback baseado em configs preenchidas (Legado)
-    if (origem_datasource === "IDM") return "API"; 
-
+    // --- Lógica para RH ---
     if (origem_datasource === "RH") {
+      // Prioridade: Configuração explícita de API ou DB no HRConfig
       if (hrConfig?.api_url) return "API";
       if (hrConfig?.db_host || hrConfig?.db_url) return "DATABASE";
+      // Fallback
+      if (type_datasource === 'API') return "API";
+      if (type_datasource === 'DATABASE') return "DATABASE";
       return "CSV"; 
     }
-    
-    if (origem_datasource === "SISTEMA" && systemConfig) {
-      const type = processingTarget === "CONTAS" 
-        ? systemConfig.tipo_fonte_contas 
-        : systemConfig.tipo_fonte_recursos;
-      
-      // Mapeamento explícito dos enums do banco
-      if (type === 'API') return "API";
-      if (type === 'DATABASE') return "DATABASE";
-      return "CSV";
+
+    // --- Lógica para IDM ---
+    if (origem_datasource === "IDM") return "API"; 
+
+    // --- Lógica para SISTEMA ---
+    if (origem_datasource === "SISTEMA") {
+        const config = systemConfig || {}; // Garante que não quebra se for null
+        
+        // Determina o tipo baseado no Alvo (Contas ou Recursos)
+        const typeInConfig = processingTarget === "CONTAS" 
+            ? config.tipo_fonte_contas 
+            : config.tipo_fonte_recursos;
+
+        // 1. Verificação Explícita do Enum
+        if (typeInConfig === 'API') return "API";
+        if (typeInConfig === 'DATABASE') return "DATABASE";
+        if (typeInConfig === 'CSV') return "CSV";
+
+        // 2. Verificação de Fallback (Inspeção de Propriedades)
+        
+        // Determina qual campo "diretorio" usar
+        const specificUrl = processingTarget === "CONTAS" ? config.diretorio_contas : config.diretorio_recursos;
+
+        // Se o campo começa com http/https, assumimos que é uma URL de API (pois removemos a api_url global)
+        if (specificUrl && (specificUrl.startsWith('http://') || specificUrl.startsWith('https://'))) return "API";
+        
+        if ((config.db_host || config.db_url) && (!typeInConfig || typeInConfig !== 'CSV')) return "DATABASE";
+        
+        // 3. Último recurso: Enum raiz (menos confiável para Sistemas, mas útil)
+        if (type_datasource === 'API') return "API";
+        if (type_datasource === 'DATABASE') return "DATABASE";
     }
     
     return "CSV"; 

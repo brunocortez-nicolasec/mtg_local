@@ -1,5 +1,3 @@
-// material-react-app/src/examples/Navbars/DashboardNavbar/index.js
-
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import PropTypes from "prop-types";
@@ -11,9 +9,9 @@ import MenuItem from "@mui/material/MenuItem";
 import Icon from "@mui/material/Icon";
 import MDBox from "components/MDBox";
 import NotificationItem from "examples/Items/NotificationItem";
-import AuthService from "services/auth-service";
-import brandLogoLight from "assets/images/mtg_azul_sem_fundo.png"; // Logo para modo claro
-import brandLogoDark from "assets/images/mtg_branco_sem_fundo.png"; // Logo para modo escuro
+// import AuthService from "services/auth-service"; // <-- AuthService antigo não é mais necessário para logout
+import brandLogoLight from "assets/images/mtg_azul_sem_fundo.png"; 
+import brandLogoDark from "assets/images/mtg_branco_sem_fundo.png"; 
 import {
   navbar,
   navbarContainer,
@@ -30,13 +28,19 @@ import {
   logout,
 } from "context";
 
+// --- IMPORTAÇÃO DO KEYCLOAK ---
+import { useKeycloak } from "@react-keycloak/web";
+
 function DashboardNavbar({ absolute, light, isMini }) {
   const [navbarType, setNavbarType] = useState();
   const [controller, dispatch] = useMaterialUIController();
-  const { miniSidenav, transparentNavbar, fixedNavbar, openConfigurator, darkMode } = controller; // darkMode já está aqui
+  const { miniSidenav, transparentNavbar, fixedNavbar, openConfigurator, darkMode } = controller;
   const [openMenu, setOpenMenu] = useState(false);
   const [userMenu, setUserMenu] = useState(null);
   const navigate = useNavigate();
+
+  // --- HOOK DO KEYCLOAK ---
+  const { keycloak } = useKeycloak();
 
   useEffect(() => {
     if (fixedNavbar) {
@@ -96,10 +100,21 @@ function DashboardNavbar({ absolute, light, isMini }) {
     },
   });
 
-  const handleLogOut = async () => {
-    await AuthService.logout();
+  // --- FUNÇÃO DE LOGOUT ATUALIZADA ---
+  const handleLogOut = () => {
+    // 1. Limpa o estado local do React (Context)
     logout(dispatch);
-    navigate("/auth/login");
+    
+    // 2. Chama o logout do Keycloak para matar a sessão no servidor TAS
+    // O redirectUri define para onde o usuário volta após sair
+    if (keycloak) {
+        keycloak.logout({
+            redirectUri: window.location.origin + '/mind-the-gap/auth/login'
+        });
+    } else {
+        // Fallback caso keycloak não esteja injetado (raro)
+        navigate("/auth/login");
+    }
   };
 
   const handleLogoutAndCloseMenu = () => {
@@ -117,7 +132,7 @@ function DashboardNavbar({ absolute, light, isMini }) {
         <MDBox color="inherit" mb={{ xs: 1, md: 0 }} sx={(theme) => navbarRow(theme, { isMini })}>
           <MDBox
             component="img"
-            src={darkMode ? brandLogoDark : brandLogoLight} // Escolhe o src baseado no darkMode
+            src={darkMode ? brandLogoDark : brandLogoLight} 
             alt="Mind The Gap Logo"
             sx={{
               maxHeight: "3.5rem",
@@ -129,13 +144,11 @@ function DashboardNavbar({ absolute, light, isMini }) {
           <MDBox sx={(theme) => navbarRow(theme, { isMini })}>
             <MDBox color={light ? "white" : "inherit"} sx={{ display: "flex", alignItems: "center" }}>
               
-{/* ======================= INÍCIO DA CORREÇÃO (Mover Ícone) ======================= */}
-              {/* Este ícone (hamburger) agora fica visível no desktop */}
               <IconButton
                 size="small"
                 disableRipple
                 color="inherit"
-                sx={navbarIconButton} // Usa o estilo padrão de desktop
+                sx={navbarIconButton} 
                 onClick={handleMiniSidenav}
               >
                 <Icon sx={defaultIconStyle} fontSize="medium">
@@ -143,19 +156,17 @@ function DashboardNavbar({ absolute, light, isMini }) {
                 </Icon>
               </IconButton>
               
-              {/* Este ícone (mobile) agora fica escondido no desktop */}
               <IconButton
                 size="small"
                 disableRipple
                 color="inherit"
-                sx={navbarMobileMenu} // (sx o esconde no desktop)
+                sx={navbarMobileMenu} 
                 onClick={handleMiniSidenav}
               >
                 <Icon sx={defaultIconStyle} fontSize="medium">
                   {miniSidenav ? "menu_open" : "menu"}
                 </Icon>
               </IconButton>
-{/* ======================== FIM DA CORREÇÃO (Mover Ícone) ========================= */}
               
               <IconButton
                 size="medium"

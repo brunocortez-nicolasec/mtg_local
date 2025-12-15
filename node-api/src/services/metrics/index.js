@@ -111,7 +111,7 @@ const getSystemMetrics = async (req, res) => {
                 id_in_system_account: id.identity_id_hr,
                 name_account: id.name_hr,
                 email_account: id.email_hr,
-                cpf_account: id.cpf_hr, // <-- ADICIONADO PARA CONSISTÊNCIA
+                cpf_account: id.cpf_hr, 
                 status_account: id.status_hr,
                 user_type_account: id.user_type_hr,
                 extra_data_account: id.extra_data_hr,
@@ -152,7 +152,6 @@ const getSystemMetrics = async (req, res) => {
             identityExceptions.map(ex => `${ex.identityId}_ACCESS_NOT_GRANTED_${ex.targetSystem}`)
         );
 
-// ======================= INÍCIO DA ADIÇÃO (Buscar Regras SoD) =======================
         // 3.6. Buscar TODAS as Regras de SoD
         const allSodRules = await tx.sodRule.findMany({
             where: { userId: userIdInt }
@@ -160,7 +159,6 @@ const getSystemMetrics = async (req, res) => {
 
         // Organiza as regras por sistema para consulta rápida
         const sodRulesBySystem = allSodRules.reduce((acc, rule) => {
-            // 'global' para regras com systemId = null
             const key = rule.systemId || 'global'; 
             if (!acc[key]) {
                 acc[key] = [];
@@ -169,12 +167,17 @@ const getSystemMetrics = async (req, res) => {
             return acc;
         }, {});
         const globalSodRules = sodRulesBySystem['global'] || [];
-// ======================== FIM DA ADIÇÃO (Buscar Regras SoD) =========================
 
-        // 4. Calcular Métricas de Visão Geral (Pills e Gráfico de Pizza)
+        // =====================================================================
+        // 4. Calcular Métricas de Visão Geral (CORRIGIDO)
+        // =====================================================================
         const total = allAccounts.length;
-        const active = allAccounts.filter(acc => acc.status_account === 'Ativo').length;
-        const inactive = allAccounts.filter(acc => acc.status_account === 'Inativo').length;
+        
+        // CORREÇÃO: Usamos cleanText para garantir que "Ativo", "ativo", " ATIVO " sejam contados iguais.
+        const active = allAccounts.filter(acc => cleanText(acc.status_account) === 'ativo').length;
+        const inactive = allAccounts.filter(acc => cleanText(acc.status_account) === 'inativo').length;
+        
+        // Qualquer coisa que não seja 'ativo' ou 'inativo' cairá aqui (ex: null, undefined, "Suspenso", "Férias")
         const unknown = total - (active + inactive);
 
         const byUserType = allAccounts.reduce((acc, account) => {
@@ -193,9 +196,10 @@ const getSystemMetrics = async (req, res) => {
         const divergentAccountIds = new Set();
         const divergentIdentityIds = new Set();
 
+        // Correção para detectar admin independente de Case Sensitive
         const acessoPrivilegiado = allAccounts.filter(acc =>
-            acc.status_account === 'Ativo' &&
-            acc.assignments.some(a => a.resource.name_resource.toLowerCase().includes('admin'))
+            cleanText(acc.status_account) === 'ativo' &&
+            acc.assignments.some(a => cleanText(a.resource.name_resource).includes('admin'))
         ).length;
 
         // 6. Calcular Divergências (Loop Principal)
@@ -205,9 +209,7 @@ const getSystemMetrics = async (req, res) => {
         let divergenciaEmailCount = 0;
         let divergenciaCpfCount = 0;
         let acessoPrevistoNaoConcedidoCount = 0;
-// ======================= INÍCIO DA ADIÇÃO (Contador SoD) =======================
-        let sodViolationCount = 0; // <-- ADICIONADO AQUI
-// ======================== FIM DA ADIÇÃO (Contador SoD) =========================
+        let sodViolationCount = 0; 
         
         for (const account of allAccounts) {
             if (account.system.name_system.toUpperCase() === 'RH') continue;
@@ -215,13 +217,14 @@ const getSystemMetrics = async (req, res) => {
             const rhEquivalent = account.identity; 
             let hasDivergence = false;
             
-            const isAdmin = account.assignments.some(a => a.resource.name_resource.toLowerCase().includes('admin'));
+            const isAdmin = account.assignments.some(a => cleanText(a.resource.name_resource).includes('admin'));
             
             if (rhEquivalent) {
                 const { status_hr: rhStatus, name_hr: rhName, email_hr: rhEmail, cpf_hr: rhCpf } = rhEquivalent;
                 
-                // --- ZUMBI ---
-                if (account.status_account === 'Ativo' && rhStatus === 'Inativo') {
+                // --- ZUMBI (Correção Case Insensitive) ---
+                // Se conta está Ativa no App, mas RH diz Inativo
+                if (cleanText(account.status_account) === 'ativo' && cleanText(rhStatus) === 'inativo') {
                     if (!accountExceptionsSet.has(`${account.id}_ZOMBIE_ACCOUNT`)) {
                         inativosRHAtivosAppCount++;
                         hasDivergence = true;
@@ -246,7 +249,7 @@ const getSystemMetrics = async (req, res) => {
                     }
                 }
 
-                // --- CPF (NOVO) ---
+                // --- CPF ---
                 const hasCpfDivergence = rhCpf && account.cpf_account && cleanCpf(rhCpf) !== cleanCpf(account.cpf_account);
                 if (hasCpfDivergence) {
                     if (!accountExceptionsSet.has(`${account.id}_CPF_MISMATCH`)) {
@@ -257,7 +260,7 @@ const getSystemMetrics = async (req, res) => {
 
                 // --- ADMIN DORMENTE ---
                 const loginDateStr = account.extra_data_account?.last_login;
-                if (account.status_account === 'Ativo' && loginDateStr) {
+                if (cleanText(account.status_account) === 'ativo' && loginDateStr) {
                     const loginDate = new Date(loginDateStr);
                     if (!isNaN(loginDate.getTime()) && loginDate < ninetyDaysAgo) {
                         contasDormentes++;
@@ -278,65 +281,49 @@ const getSystemMetrics = async (req, res) => {
                 }
             }
             
-// ======================= INÍCIO DA ADIÇÃO (Lógica de SoD) =======================
             // 8. Verificar Violações de SoD
-            
-            // Pega as regras globais + regras específicas do sistema desta conta
             const systemRules = sodRulesBySystem[account.systemId] || [];
             const applicableSodRules = [...globalSodRules, ...systemRules];
 
             if (applicableSodRules.length > 0) {
-                // Cria um Set com os IDs dos Recursos (perfis) que a conta possui
                 const accountResourceIds = new Set(account.assignments.map(a => a.resource.id));
 
                 for (const rule of applicableSodRules) {
                     let isViolation = false;
 
                     if (rule.ruleType === 'ROLE_X_ROLE') {
-                        // Se a regra é "Perfil vs Perfil"
                         const hasProfileA = accountResourceIds.has(parseInt(rule.valueAId, 10));
                         const hasProfileB = accountResourceIds.has(parseInt(rule.valueBId, 10));
                         if (hasProfileA && hasProfileB) {
                             isViolation = true;
                         }
-
                     } else if (rule.ruleType === 'ATTR_X_ROLE') {
-                        // Se a regra é "Atributo vs Perfil"
-                        if (rhEquivalent) { // Só pode checar se a conta tem uma identidade
+                        if (rhEquivalent) { 
                             const hasProfileB = accountResourceIds.has(parseInt(rule.valueBId, 10));
-                            
-                            // Pega o valor do atributo da identidade (ex: 'user_type_hr')
                             const attributeValue = rhEquivalent[rule.valueAId]; 
-                            
                             const attributeMatches = checkAttributeMatch(
                                 rule.valueAOperator,
                                 attributeValue,
                                 rule.valueAValue
                             );
-
                             if (attributeMatches && hasProfileB) {
                                 isViolation = true;
                             }
                         }
                     }
-                    // (Outros tipos de regra como ATTR_X_SYSTEM não se aplicam a *contas*)
 
                     if (isViolation) {
                         if (!accountExceptionsSet.has(`${account.id}_SOD_VIOLATION`)) {
                             sodViolationCount++;
                             hasDivergence = true;
                         }
-                        // Importante: Quebra o loop de regras assim que a *primeira* violação for encontrada
-                        // para não contar a mesma conta múltiplas vezes
                         break; 
                     }
                 }
             }
-// ======================== FIM DA ADIÇÃO (Lógica de SoD) =========================
             
             if (hasDivergence) {
                 divergentAccountIds.add(account.id);
-                // Se a conta tem uma identidade e uma divergência, a identidade é divergente
                 if (account.identityId) {
                     divergentIdentityIds.add(account.identityId);
                 }
@@ -348,7 +335,7 @@ const getSystemMetrics = async (req, res) => {
         } // Fim do loop for(allAccounts)
 
         // 7. Calcular Acesso Previsto Não Concedido
-        const activeRhIdentities = rhIdentities.filter(rhId => rhId.status_hr === 'Ativo');
+        const activeRhIdentities = rhIdentities.filter(rhId => cleanText(rhId.status_hr) === 'ativo');
         
         const accountsByIdentity = allAccounts.reduce((acc, account) => {
             if (!account.identityId) return acc;
@@ -381,9 +368,6 @@ const getSystemMetrics = async (req, res) => {
             });
         }
         
-        // 8. Métricas Obsoletas
-        // const sodViolationCount = 0; // <-- REMOVIDO DAQUI
-
         // 9. Calcular Riscos Financeiros
         const CUSTOS_DE_RISCO = {
             CRITICO: 10000,
@@ -411,7 +395,6 @@ const getSystemMetrics = async (req, res) => {
         // Lógica do Índice de Conformidade (baseada em Identidades)
         const totalPopulation = rhIdentities.length; 
         const totalDivergentIdentities = divergentIdentityIds.size; 
-        
 
         const calculatedIndex = totalPopulation > 0 
             ? ((totalPopulation - totalDivergentIdentities) / totalPopulation) * 100 

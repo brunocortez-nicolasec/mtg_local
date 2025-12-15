@@ -15,6 +15,8 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import FormControl from "@mui/material/FormControl";
 import FormLabel from "@mui/material/FormLabel";
 import Divider from "@mui/material/Divider";
+import Icon from "@mui/material/Icon";
+import Switch from "@mui/material/Switch";
 import CircularProgress from "@mui/material/CircularProgress"; 
 
 // Material Dashboard 2 React components
@@ -26,7 +28,8 @@ import MDAlert from "components/MDAlert";
 
 const tipoFonteSistemaOptions = ["CSV", "DATABASE", "API"];
 const databaseTypeOptions = ["postgres", "mysql", "oracle", "sqlserver"]; 
-const apiMethodOptions = ["GET", "POST"]; // Novo: Opções de Método
+const apiMethodOptions = ["GET", "POST", "PUT", "DELETE"]; 
+const authTypeOptions = ["No Auth", "Basic Auth", "Bearer Token"];
 
 function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
   
@@ -62,17 +65,33 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
     csv_delimiter: ",", 
     csv_quote: "\"",   
 
-    // --- NOVOS CAMPOS API (Compartilhados) ---
+    // --- API ---
+    api_subtype: "REST", 
     api_method: "GET",
     api_headers: '{"Content-Type": "application/json"}',
     api_body: "",
     api_response_path: "",
+    
+    // --- AUTH ---
+    api_auth_type: "No Auth",
+    api_auth_user: "",
+    api_auth_password: "",
+    api_auth_token: "",
+
+    // --- AUTH DINÂMICA ---
+    auth_is_dynamic: false,
+    auth_token_url: "",
+    auth_client_id: "",
+    auth_client_secret: "",
+    auth_grant_type: "client_credentials",
+    auth_scope: "",
 
     // Status de Teste
     testStatusContas: { show: false, color: "info", message: "" },
     isTestingContas: false,
     testStatusRecursos: { show: false, color: "info", message: "" },
     isTestingRecursos: false,
+    isFetchingToken: false,
     
     saveError: null,
   };
@@ -92,6 +111,26 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
         setStep(2); 
         const config = initialData.systemConfig || {};
         
+        // Inferência REST/SOAP
+        let inferredSubtype = "REST";
+        const bodyContent = config.api_body || "";
+        const headersContent = config.api_headers ? JSON.stringify(config.api_headers).toLowerCase() : "";
+        if (bodyContent.includes("soap:Envelope") || headersContent.includes("text/xml") || headersContent.includes("soapaction")) {
+            inferredSubtype = "SOAP";
+        }
+        
+        // Inferência Auth
+        let inferredAuthType = "No Auth";
+        let inferredToken = "";
+        if (config.api_headers && config.api_headers.Authorization) {
+            if (config.api_headers.Authorization.startsWith("Bearer ")) {
+                inferredAuthType = "Bearer Token";
+                inferredToken = config.api_headers.Authorization.replace("Bearer ", "");
+            } else if (config.api_headers.Authorization.startsWith("Basic ")) {
+                inferredAuthType = "Basic Auth";
+            }
+        }
+
         setFormData({
             ...defaultState,
             name: initialData.name_datasource || "",
@@ -118,10 +157,23 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
             csv_quote: config.csv_quote || "\"",      
 
             // API Fields
+            api_subtype: inferredSubtype,
             api_method: config.api_method || "GET",
             api_headers: config.api_headers ? JSON.stringify(config.api_headers, null, 2) : '{"Content-Type": "application/json"}',
             api_body: config.api_body || "",
             api_response_path: config.api_response_path || "",
+            
+            // AUTH
+            api_auth_type: inferredAuthType,
+            api_auth_token: inferredToken,
+
+            // DYNAMIC AUTH
+            auth_is_dynamic: config.auth_is_dynamic || false,
+            auth_token_url: config.auth_token_url || "",
+            auth_client_id: config.auth_client_id || "",
+            auth_client_secret: config.auth_client_secret || "",
+            auth_grant_type: config.auth_grant_type || "client_credentials",
+            auth_scope: config.auth_scope || "",
             
             testStatusContas: { show: false, color: "success" }, 
             testStatusRecursos: { show: false, color: "success" }, 
@@ -134,7 +186,7 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
     }
   }, [initialData, open]);
 
-  // Limpa status de teste ao mudar configurações chave
+  // Limpeza de status
   useEffect(() => {
     setFormData(prev => ({
        ...prev,
@@ -146,7 +198,7 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
     formData.db_name, formData.db_user, formData.db_password, 
     formData.db_url, formData.db_schema, formData.db_type,
     formData.csv_delimiter, formData.csv_quote,
-    formData.api_headers, formData.api_method // Adicionado API
+    formData.api_headers, formData.api_method, formData.api_auth_type
   ]);
 
   useEffect(() => {
@@ -159,8 +211,11 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
 
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const { name, value, checked, type } = e.target;
+    setFormData((prev) => ({ 
+        ...prev, 
+        [name]: type === 'checkbox' ? checked : value 
+    }));
   };
   
   const handleAutocompleteChange = (name, newValue) => {
@@ -175,108 +230,110 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
         return { ...prev, ...updates };
     });
   };
+
+  const handleApiSubtypeChange = (e) => {
+      const subtype = e.target.value;
+      const isSoap = subtype === "SOAP";
+
+      setFormData(prev => ({
+          ...prev,
+          api_subtype: subtype,
+          api_method: isSoap ? "POST" : "GET",
+          api_headers: isSoap 
+            ? '{\n  "Content-Type": "text/xml",\n  "SOAPAction": "http://tempuri.org/Action"\n}' 
+            : '{\n  "Content-Type": "application/json"\n}',
+          api_body: isSoap 
+            ? '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">\n  <soap:Body>\n    \n  </soap:Body>\n</soap:Envelope>' 
+            : "",
+          api_response_path: ""
+      }));
+  };
+
+  const getFinalHeaders = () => {
+      let headers = {};
+      try {
+          if (formData.api_headers) headers = JSON.parse(formData.api_headers);
+      } catch (e) {
+          console.error("Erro ao parsear headers manuais");
+      }
+
+      if (formData.api_auth_type === "Bearer Token" && formData.api_auth_token) {
+          headers["Authorization"] = `Bearer ${formData.api_auth_token}`;
+      } else if (formData.api_auth_type === "Basic Auth" && formData.api_auth_user && formData.api_auth_password) {
+          const token = btoa(`${formData.api_auth_user}:${formData.api_auth_password}`);
+          headers["Authorization"] = `Basic ${token}`;
+      }
+      return headers;
+  };
   
   const handleNextStep = () => {
     if (!formData.name) return;
     setStep(2);
   };
 
-  const handleTestCSV = async (diretorio, setTesting, setStatusState) => {
-    if (!diretorio) {
-        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "warning", message: "Insira o diretório para testar." } }));
-        return;
-    }
-    setFormData(prev => ({ ...prev, [setTesting]: true, [setStatusState]: { show: true, color: "info", message: "Testando conexão com o arquivo..." } }));
-    
-    try {
-      const response = await api.post("/datasources/test-csv", { 
-          diretorio,
-          delimiter: formData.csv_delimiter,
-          quote: formData.csv_quote
-      });
-      const colsCount = response.data.detectedColumns || 0;
-      setFormData(prev => ({ 
-        ...prev, 
-        [setStatusState]: { show: true, color: "success", message: `Sucesso! Encontrado (${colsCount} colunas).` } 
-      }));
-    } catch (error) {
-      const message = error.response?.data?.message || "Erro desconhecido.";
-      setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "error", message: `Falha: ${message}` } }));
-    } finally {
-      setFormData(prev => ({ ...prev, [setTesting]: false }));
-    }
+  // --- Função para Buscar Token Dinamicamente ---
+  const handleFetchToken = async () => {
+      if (!formData.auth_token_url || !formData.auth_client_id) {
+          // Usa o status de contas para feedback genérico se não tiver um específico
+          setFormData(prev => ({ ...prev, testStatusContas: { show: true, color: "warning", message: "Preencha a URL e Client ID." } }));
+          return;
+      }
+
+      setFormData(prev => ({ ...prev, isFetchingToken: true }));
+
+      try {
+          const payload = {
+              client_id: formData.auth_client_id,
+              client_secret: formData.auth_client_secret,
+              grant_type: formData.auth_grant_type,
+              scope: formData.auth_scope
+          };
+
+          const response = await api.post("/datasources/test-api", {
+              apiUrl: formData.auth_token_url,
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams(payload).toString(), 
+              responsePath: "" 
+          });
+
+          if (response.data && response.data.fullResponse) {
+               const token = response.data.fullResponse.access_token || response.data.fullResponse.token;
+               if (token) {
+                   setFormData(prev => ({ 
+                       ...prev, 
+                       api_auth_token: token,
+                       testStatusContas: { show: true, color: "success", message: "Token gerado com sucesso!" }
+                   }));
+               } else {
+                   setFormData(prev => ({ ...prev, testStatusContas: { show: true, color: "warning", message: "Token não encontrado na resposta." } }));
+               }
+          }
+
+      } catch (error) {
+          const msg = error.response?.data?.message || error.message;
+          setFormData(prev => ({ ...prev, testStatusContas: { show: true, color: "error", message: `Erro Token: ${msg}` } }));
+      } finally {
+          setFormData(prev => ({ ...prev, isFetchingToken: false }));
+      }
   };
 
-  const handleTestDB = async (tableName, setTesting, setStatusState) => {
-    if (!tableName) {
-        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "warning", message: "Informe o nome da Tabela para validar." } }));
-        return;
-    }
-
-    if (formData.db_connection_type === "HOST") {
-        if (!formData.db_host || !formData.db_port || !formData.db_user || !formData.db_name) {
-            setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "warning", message: "Preencha os dados de conexão do Banco (Host, User, etc)." } }));
-            return;
-        }
-    } else {
-        if (!formData.db_url) {
-            setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "warning", message: "Preencha a URL de conexão." } }));
-            return;
-        }
-    }
-
-    setFormData(prev => ({ ...prev, [setTesting]: true, [setStatusState]: { show: true, color: "info", message: `Conectando e verificando tabela '${tableName}'...` } }));
-
-    try {
-        const response = await api.post("/datasources/test-db", { 
-            connectionType: formData.db_connection_type,
-            host: formData.db_host,
-            port: formData.db_port,
-            user: formData.db_user,
-            password: formData.db_password,
-            database: formData.db_name,
-            url: formData.db_url,
-            type: formData.db_type,
-            schema: formData.db_schema,
-            table: tableName 
-        });
-        
-        let successMsg = response.data.message;
-        if (response.data.columns?.length > 0) {
-             const colList = response.data.columns.slice(0, 3).join(", "); 
-             successMsg = `OK! Tabela encontrada. Cols: [${colList}...]`;
-        }
-        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "success", message: successMsg } }));
-    } catch (error) {
-        const message = error.response?.data?.message || "Erro desconhecido.";
-        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "error", message: `Falha: ${message}` } }));
-    } finally {
-        setFormData(prev => ({ ...prev, [setTesting]: false }));
-    }
-  };
-
-  // --- NOVA FUNÇÃO: Teste API ---
+  // --- Testes de Conexão ---
   const handleTestAPI = async (endpointUrl, setTesting, setStatusState) => {
     if (!endpointUrl) {
         setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "warning", message: "Informe a URL do Endpoint." } }));
         return;
     }
 
-    let headersJson = {};
-    try {
-        if (formData.api_headers) headersJson = JSON.parse(formData.api_headers);
-    } catch (e) {
-        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "error", message: "Headers JSON inválido." } }));
-        return;
-    }
+    const finalHeaders = getFinalHeaders(); 
 
     setFormData(prev => ({ ...prev, [setTesting]: true, [setStatusState]: { show: true, color: "info", message: "Enviando requisição API..." } }));
 
     try {
         const response = await api.post("/datasources/test-api", {
-            apiUrl: endpointUrl, // Usamos o campo específico (contas ou recursos) como URL
+            apiUrl: endpointUrl, 
             method: formData.api_method,
-            headers: headersJson,
+            headers: finalHeaders, 
             body: formData.api_body,
             responsePath: formData.api_response_path
         });
@@ -290,6 +347,40 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
     } catch (error) {
         const message = error.response?.data?.message || error.message;
         setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "error", message: `Falha API: ${message}` } }));
+    } finally {
+        setFormData(prev => ({ ...prev, [setTesting]: false }));
+    }
+  };
+
+  const handleTestCSV = async (diretorio, setTesting, setStatusState) => {
+    if (!diretorio) {
+        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "warning", message: "Insira o diretório." } }));
+        return;
+    }
+    setFormData(prev => ({ ...prev, [setTesting]: true, [setStatusState]: { show: true, color: "info", message: "Testando arquivo..." } }));
+    try {
+      const response = await api.post("/datasources/test-csv", { diretorio, delimiter: formData.csv_delimiter, quote: formData.csv_quote });
+      const cols = response.data.detectedColumns || 0;
+      setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "success", message: `Sucesso! (${cols} colunas).` } }));
+    } catch (e) {
+      setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "error", message: e.message } }));
+    } finally {
+      setFormData(prev => ({ ...prev, [setTesting]: false }));
+    }
+  };
+
+  const handleTestDB = async (tableName, setTesting, setStatusState) => {
+    if (!tableName) {
+        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "warning", message: "Informe a Tabela." } }));
+        return;
+    }
+    setFormData(prev => ({ ...prev, [setTesting]: true, [setStatusState]: { show: true, color: "info", message: "Conectando BD..." } }));
+    try {
+        const response = await api.post("/datasources/test-db", { ...formData, connectionType: formData.db_connection_type, host: formData.db_host, port: formData.db_port, user: formData.db_user, password: formData.db_password, database: formData.db_name, url: formData.db_url, type: formData.db_type, schema: formData.db_schema, table: tableName });
+        const cols = response.data.columns?.length || 0;
+        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "success", message: `OK! Tabela encontrada (${cols} cols).` } }));
+    } catch (e) {
+        setFormData(prev => ({ ...prev, [setStatusState]: { show: true, color: "error", message: e.message } }));
     } finally {
         setFormData(prev => ({ ...prev, [setTesting]: false }));
     }
@@ -310,14 +401,6 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
   const getSaveDisabled = () => {
       if (isCreatingSystem) return true; 
       if (formData.isTestingContas || formData.isTestingRecursos) return true;
-      
-      // Validação: Exige sucesso no teste (exceto se for API e não testou ainda - opcional)
-      if (formData.tipo_fonte_contas !== 'API') {
-          if (formData.testStatusContas.color !== 'success') return true;
-      }
-      if (formData.tipo_fonte_recursos !== 'API') {
-           if (formData.testStatusRecursos.color !== 'success') return true;
-      }
       return false;
   };
   
@@ -325,8 +408,7 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
     setFormData(prev => ({ ...prev, saveError: null }));
     setIsCreatingSystem(true);
 
-    let finalHeaders = {};
-    try { if (formData.api_headers) finalHeaders = JSON.parse(formData.api_headers); } catch(e) {}
+    const finalHeaders = getFinalHeaders();
 
     try {
         let finalSystemId = formData.systemId;
@@ -345,9 +427,9 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
             systemId: finalSystemId, 
             
             tipo_fonte_contas: formData.tipo_fonte_contas,
-            diretorio_contas: formData.diretorio_contas, // Serve como URL no modo API
+            diretorio_contas: formData.diretorio_contas, 
             tipo_fonte_recursos: formData.tipo_fonte_recursos,
-            diretorio_recursos: formData.diretorio_recursos, // Serve como URL no modo API
+            diretorio_recursos: formData.diretorio_recursos, 
 
             db_connection_type: formData.db_connection_type,
             db_host: formData.db_host,
@@ -362,26 +444,196 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
             csv_delimiter: formData.csv_delimiter,
             csv_quote: formData.csv_quote,
 
-            // API Fields
             api_method: formData.api_method,
             api_headers: finalHeaders,
             api_body: formData.api_body,
             api_response_path: formData.api_response_path,
+
+            auth_is_dynamic: formData.auth_is_dynamic,
+            auth_token_url: formData.auth_token_url,
+            auth_client_id: formData.auth_client_id,
+            auth_client_secret: formData.auth_client_secret,
+            auth_grant_type: formData.auth_grant_type,
+            auth_scope: formData.auth_scope
         };
 
         await onSave(payload); 
         
     } catch (error) {
         console.error("Erro no fluxo de salvamento:", error);
-        const message = error.response?.data?.message || "Erro ao criar sistema ou salvar configurações.";
+        const message = error.response?.data?.message || "Erro ao salvar.";
         setFormData(prev => ({ ...prev, saveError: message }));
     } finally {
         setIsCreatingSystem(false);
     }
   };
   
+  // Renderizadores de Campos
+  const renderCommonApiFields = () => (
+      <>
+        <Grid item xs={12}>
+            <FormControl component="fieldset">
+              <FormLabel component="legend" sx={{ fontSize: '0.875rem', mb: 1, color: 'text.main' }}>Tipo de API</FormLabel>
+              <RadioGroup row name="api_subtype" value={formData.api_subtype} onChange={handleApiSubtypeChange}>
+                <FormControlLabel value="REST" control={<Radio />} label={<MDTypography variant="body2" fontWeight={formData.api_subtype === 'REST' ? "bold" : "regular"}>REST (JSON)</MDTypography>} />
+                <FormControlLabel value="SOAP" control={<Radio />} label={<MDTypography variant="body2" fontWeight={formData.api_subtype === 'SOAP' ? "bold" : "regular"}>SOAP (XML)</MDTypography>} />
+              </RadioGroup>
+            </FormControl>
+        </Grid>
+
+        <Grid item xs={12} md={4}>
+            <Autocomplete
+            options={apiMethodOptions}
+            value={formData.api_method || "GET"}
+            onChange={(e, nv) => handleAutocompleteChange("api_method", nv)}
+            renderInput={(params) => <MDInput {...params} label="Método" />}
+            fullWidth
+            disabled={formData.api_subtype === 'SOAP'} 
+            />
+        </Grid>
+        
+        {/* --- AUTENTICAÇÃO REST --- */}
+        {formData.api_subtype === 'REST' && (
+            <>
+                <Grid item xs={12}>
+                    <MDTypography variant="caption" fontWeight="bold" color="text" textTransform="uppercase">Autenticação</MDTypography>
+                </Grid>
+                
+                <Grid item xs={12} md={4}>
+                    <Autocomplete
+                    options={authTypeOptions}
+                    value={formData.api_auth_type}
+                    onChange={(e, nv) => handleAutocompleteChange("api_auth_type", nv)}
+                    renderInput={(params) => <MDInput {...params} label="Tipo de Autenticação" />}
+                    fullWidth
+                    disableClearable
+                    />
+                </Grid>
+                
+                {formData.api_auth_type === 'Basic Auth' && (
+                    <>
+                        <Grid item xs={12} md={4}>
+                        <MDInput label="Usuário" name="api_auth_user" value={formData.api_auth_user} onChange={handleInputChange} fullWidth />
+                        </Grid>
+                        <Grid item xs={12} md={4}>
+                        <MDInput label="Senha" name="api_auth_password" value={formData.api_auth_password} type="password" onChange={handleInputChange} fullWidth />
+                        </Grid>
+                    </>
+                )}
+                
+                {formData.api_auth_type === 'Bearer Token' && (
+                    <Grid item xs={12} md={8}>
+                    <MDInput 
+                        label="Token (Bearer)" 
+                        name="api_auth_token" 
+                        value={formData.api_auth_token} 
+                        onChange={handleInputChange} 
+                        fullWidth 
+                        placeholder="eyJhbGciOiJIUz..." 
+                        InputProps={{
+                            endAdornment: (
+                                <Tooltip title="Ativar requisição automática de token (Bearer)">
+                                    <Switch checked={formData.auth_is_dynamic} onChange={(e) => handleInputChange({ target: { name: 'auth_is_dynamic', value: null, checked: e.target.checked, type: 'checkbox' } })} />
+                                </Tooltip>
+                            )
+                        }}
+                        helperText={formData.auth_is_dynamic ? "Modo Dinâmico: Token será gerado automaticamente." : ""}
+                    />
+                    </Grid>
+                )}
+
+                {/* --- OAUTH2 / DYNAMIC TOKEN (LIMPO) --- */}
+                {formData.api_auth_type === 'Bearer Token' && formData.auth_is_dynamic && (
+                    <>
+                        <Grid item xs={12}>
+                            <Divider sx={{my: 1}} />
+                            <MDBox display="flex" alignItems="center">
+                                <Icon color="info" sx={{ mr: 1 }}>sync</Icon>
+                                <MDTypography variant="button" fontWeight="bold" color="info" textTransform="uppercase">
+                                    Configuração de Token (Bearer)
+                                </MDTypography>
+                            </MDBox>
+                        </Grid>
+                        
+                        <Grid item xs={12} md={8}>
+                            <MDInput label="URL do Token" name="auth_token_url" value={formData.auth_token_url} onChange={handleInputChange} fullWidth placeholder="https://auth.provider.com/token" />
+                        </Grid>
+                        <Grid item xs={12} md={4}>
+                            <MDInput label="Grant Type" name="auth_grant_type" value={formData.auth_grant_type} onChange={handleInputChange} fullWidth placeholder="client_credentials" />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                            <MDInput label="Client ID" name="auth_client_id" value={formData.auth_client_id} onChange={handleInputChange} fullWidth />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                            <MDInput label="Client Secret" name="auth_client_secret" value={formData.auth_client_secret} onChange={handleInputChange} fullWidth type="password" />
+                        </Grid>
+                        <Grid item xs={12} md={12}>
+                            <MDInput label="Scope (Opcional)" name="auth_scope" value={formData.auth_scope} onChange={handleInputChange} fullWidth placeholder="read write" />
+                        </Grid>
+                        <Grid item xs={12} display="flex" justifyContent="flex-end">
+                            <MDButton 
+                               variant="outlined" 
+                               color="info" 
+                               size="small" 
+                               onClick={handleFetchToken}
+                               disabled={formData.isFetchingToken}
+                            >
+                                {formData.isFetchingToken ? <CircularProgress size={16} /> : "Gerar Token"}
+                            </MDButton>
+                        </Grid>
+                        <Grid item xs={12}><Divider sx={{my: 1}} /></Grid>
+                    </>
+                )}
+            </>
+        )}
+
+        <Grid item xs={12}>
+            <MDTypography variant="caption" fontWeight="bold" color="text" textTransform="uppercase">Configurações Avançadas</MDTypography>
+        </Grid>
+
+        <Grid item xs={12}>
+            <MDInput 
+                label="Headers Adicionais (JSON)" 
+                name="api_headers" 
+                value={formData.api_headers} 
+                onChange={handleInputChange} 
+                fullWidth 
+                multiline 
+                rows={3} 
+                placeholder='{"Custom-Header": "Valor"}' 
+                helperText={formData.api_auth_type !== 'No Auth' ? "O header 'Authorization' será adicionado automaticamente." : "Insira os headers em formato JSON."}
+            />
+        </Grid>
+
+        <Grid item xs={12}>
+            <MDInput 
+                label={formData.api_subtype === 'SOAP' ? "Envelope SOAP (XML)" : "Body (JSON)"}
+                name="api_body" 
+                value={formData.api_body} 
+                onChange={handleInputChange} 
+                fullWidth 
+                multiline 
+                rows={5} 
+                placeholder={formData.api_subtype === 'SOAP' ? "<soap:Envelope...>" : "{ 'filter': 'active' }"} 
+            />
+        </Grid>
+
+        <Grid item xs={12}>
+            <MDInput 
+                label="Caminho dos Dados (Response Path)" 
+                name="api_response_path" 
+                value={formData.api_response_path} 
+                onChange={handleInputChange} 
+                fullWidth 
+                placeholder={formData.api_subtype === 'SOAP' ? "soap:Envelope.soap:Body.GetResponse.Result" : "data.results"} 
+                helperText="Opcional. Caminho para achar a lista de dados."
+            />
+        </Grid>
+      </>
+  );
+
   const renderDbFields = () => {
-    // Variáveis Dinâmicas
+    /* (Mantido igual) */
     const isOracle = formData.db_type === 'oracle';
     const dbNameLabel = isOracle ? "Service Name / SID" : "Nome do Banco";
     const schemaPlaceholder = isOracle ? "USUARIO (Schema)" : "public";
@@ -472,30 +724,19 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
 
                 {/* --- API OPTIONS --- */}
                 {showApiOptions && (
-                   <>
-                      <Grid item xs={12}><Divider sx={{my: 1}} /><MDTypography variant="h6" fontWeight="medium">Configuração API (Global)</MDTypography></Grid>
-                      <Grid item xs={4}>
-                          <Autocomplete options={apiMethodOptions} value={formData.api_method} onChange={(e, nv) => handleAutocompleteChange("api_method", nv)} renderInput={(params) => <MDInput {...params} label="Método" />} fullWidth />
-                      </Grid>
-                      <Grid item xs={8}>
-                          <MDInput label="Response Path (Opcional)" name="api_response_path" value={formData.api_response_path} onChange={handleInputChange} fullWidth placeholder="data.results" helperText="Caminho para achar a lista no JSON" />
-                      </Grid>
-                      <Grid item xs={12}>
-                          <MDInput label="Headers (JSON)" name="api_headers" value={formData.api_headers} onChange={handleInputChange} fullWidth multiline rows={3} placeholder='{"Authorization": "Bearer..."}' />
-                      </Grid>
-                      <Grid item xs={12}>
-                          <MDInput label="Body (POST/SOAP)" name="api_body" value={formData.api_body} onChange={handleInputChange} fullWidth multiline rows={3} />
-                      </Grid>
-                   </>
+                    <>
+                       <Grid item xs={12}><Divider sx={{my: 1}} /><MDTypography variant="h6" fontWeight="medium">Configuração API (Global)</MDTypography></Grid>
+                       {renderCommonApiFields()}
+                    </>
                 )}
 
                 {/* --- CSV OPTIONS --- */}
                 {showCsvOptions && (
-                   <>
+                    <>
                       <Grid item xs={12}><Divider sx={{my: 1}} /><MDTypography variant="h6" fontWeight="medium">Configuração CSV</MDTypography></Grid>
                       <Grid item xs={6}><MDInput label="Delimitador" name="csv_delimiter" value={formData.csv_delimiter} onChange={handleInputChange} fullWidth /></Grid>
                       <Grid item xs={6}><MDInput label="Quote" name="csv_quote" value={formData.csv_quote} onChange={handleInputChange} fullWidth /></Grid>
-                   </>
+                    </>
                 )}
 
                 {showDbFields && renderDbFields()}

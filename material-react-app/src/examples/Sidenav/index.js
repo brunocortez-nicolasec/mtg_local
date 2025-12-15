@@ -1,5 +1,3 @@
-// material-react-app/src/examples/Sidenav/index.js
-
 import { useEffect, useMemo } from "react";
 import { useLocation, NavLink } from "react-router-dom";
 import PropTypes from "prop-types";
@@ -11,7 +9,6 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import SidenavCollapse from "examples/Sidenav/SidenavCollapse";
 import SidenavRoot from "examples/Sidenav/SidenavRoot";
-// O estilo que precisamos já está importado aqui
 import sidenavLogoLabel from "examples/Sidenav/styles/sidenav"; 
 import {
   useMaterialUIController,
@@ -27,15 +24,24 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
   const collapseName = location.pathname.replace("/", "");
 
   const { userRole, userPackage, userPlatformKeys } = useMemo(() => {
-    // (Lógica de role/package inalterada)
-    const attributes = user?.data?.attributes;
-    if (!attributes) {
-      return { userRole: null, userPackage: null, userPlatformKeys: [] };
+    // --- CORREÇÃO DE LEITURA DE PERFIL ---
+    if (!user) {
+        return { userRole: null, userPackage: null, userPlatformKeys: [] };
     }
-    const userRole = attributes.role;
+
+    // Tenta ler do formato limpo (App.js novo) ou do formato bruto (fallback)
+    // Se o user já vier formatado, 'role' está na raiz. Se não, está em data.attributes.
+    const attributes = user.data?.attributes || user;
+    
+    // O backend envia 'role' (string) ou 'profile' (objeto)
+    // Precisamos normalizar para pegar o nome da role
+    const roleName = attributes.role || (attributes.profile ? attributes.profile.name : null);
+    
     const userPackage = attributes.package;
     const userPlatformKeys = userPackage?.platforms?.map((p) => p.key) || [];
-    return { userRole, userPackage, userPlatformKeys };
+    
+    return { userRole: roleName, userPackage, userPlatformKeys };
+    // --------------------------------------
   }, [user]);
 
   let textColor = "white";
@@ -48,45 +54,33 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
   const closeSidenav = () => setMiniSidenav(dispatch, true);
 
   useEffect(() => {
-    // Função para fechar o sidenav em telas pequenas ao mudar de rota
     function handleCloseSidenavOnRoute() {
       if (window.innerWidth < 1200) {
         setMiniSidenav(dispatch, true);
       }
     }
-    
-    // Adiciona o listener para fechar ao mudar de rota (em mobile)
     window.addEventListener("resize", handleCloseSidenavOnRoute);
-    handleCloseSidenavOnRoute(); // Executa uma vez
-    
-    // Remove o listener ao desmontar
+    handleCloseSidenavOnRoute();
     return () => window.removeEventListener("resize", handleCloseSidenavOnRoute);
-  }, [dispatch, location]); // Depende apenas do dispatch e da localização
+  }, [dispatch, location]);
 
-
-  // ======================= INÍCIO DA CORREÇÃO (Lógica de Resize) =======================
-  // Esta lógica agora fica separada e reage ao 'miniSidenav'
   useEffect(() => {
-    // Ajusta a transparência baseado no estado 'miniSidenav' e no tamanho da tela
     function handleTransparentSidenav() {
       setTransparentSidenav(dispatch, window.innerWidth < 1200 ? false : transparentSidenav);
       setWhiteSidenav(dispatch, window.innerWidth < 1200 ? false : whiteSidenav);
     }
-
-    // Adiciona o listener para transparência
     window.addEventListener("resize", handleTransparentSidenav);
-    handleTransparentSidenav(); // Executa uma vez
-
-    // Remove o listener ao desmontar
+    handleTransparentSidenav(); 
     return () => window.removeEventListener("resize", handleTransparentSidenav);
   }, [dispatch, transparentSidenav, whiteSidenav]);
-  // ======================== FIM DA CORREÇÃO (Lógica de Resize) =========================
 
 
   const renderRoutes = routes.map(
     ({ type, name, icon, title, noCollapse, key, href, route, collapse, role }) => {
       let returnValue;
 
+      // --- FILTRO DE ROLE ---
+      // Se a rota tem uma role definida (ex: "Admin") e o usuário não tem essa role, esconde.
       if (role && role !== userRole) {
         return null;
       }
@@ -193,7 +187,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
           top={0}
           right={0}
           p={1.625}
-          onClick={closeSidenav} // Este 'closeSidenav' é para o X em telas mobile
+          onClick={closeSidenav} 
           sx={{ cursor: "pointer" }}
         >
           <MDTypography variant="h6" color="secondary">
@@ -205,7 +199,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
           {brandName && (
             <MDBox
               width={!brandName && "100%"}
-              sx={(theme) => sidenavLogoLabel(theme, { miniSidenav })} // <<< O estilo que funciona
+              sx={(theme) => sidenavLogoLabel(theme, { miniSidenav })} 
             >
               <MDTypography component="h6" variant="button" fontWeight="medium" color={textColor}>
                 {brandName}
@@ -215,7 +209,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
         </MDBox>
       </MDBox>
 
-      <List sx={{ mb: 2 }}> {/* Adicionado um margin-bottom na lista para espaço */}
+      <List sx={{ mb: 2 }}>
         <Divider
           light={
             (!darkMode && !whiteSidenav && !transparentSidenav) ||
@@ -225,19 +219,12 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
         {renderRoutes}
       </List>
 
-      {/* --- INÍCIO DA CORREÇÃO --- */}
-      {/* Este Box será empurrado para o final pelo 'marginTop: auto' */}
       <MDBox
         sx={(theme) => ({
-          // 1. Usa 'margin-top: auto' para empurrá-lo para o final do flex-container
           marginTop: "auto",
-          
-          // 2. Usa o estilo 'sidenavLogoLabel' para desaparecer quando 'miniSidenav' for true
           ...sidenavLogoLabel(theme, { miniSidenav }), 
-          
-          // 3. Estilos de posicionamento e espaçamento
-          paddingTop: "1rem", // Espaço acima
-          paddingBottom: "1rem", // Espaço abaixo
+          paddingTop: "1rem", 
+          paddingBottom: "1rem", 
           textAlign: "center",
         })}
       >
@@ -245,7 +232,6 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
           Versão 2.0.0
         </MDTypography>
       </MDBox>
-      {/* --- FIM DA CORREÇÃO --- */}
     </SidenavRoot>
   );
 }

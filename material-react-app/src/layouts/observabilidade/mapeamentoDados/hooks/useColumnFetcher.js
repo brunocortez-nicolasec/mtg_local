@@ -99,7 +99,7 @@ export function useColumnFetcher(dataSource, mappingTarget) {
                throw new Error("Configuração de banco de dados incompleta ou tabela não definida.");
            }
 
-        // === CENÁRIO 2: API (REST/SOAP) - NOVO ===
+        // === CENÁRIO 2: API (REST/SOAP) - ATUALIZADO ===
         } else if (isApi) {
             let apiConfig = {};
             let endpointUrl = "";
@@ -117,18 +117,26 @@ export function useColumnFetcher(dataSource, mappingTarget) {
 
             if (!endpointUrl) throw new Error("URL da API não configurada.");
 
+            // Envia TUDO para o backend testar (incluindo Auth Dinâmica)
             const response = await api.post("/datasources/test-api", {
                 apiUrl: endpointUrl,
                 method: apiConfig.api_method,
-                headers: apiConfig.api_headers, // O backend espera o JSON Object aqui
+                headers: apiConfig.api_headers, 
                 body: apiConfig.api_body,
-                responsePath: apiConfig.api_response_path
+                responsePath: apiConfig.api_response_path,
+                // NOVOS CAMPOS PARA AUTH
+                auth_is_dynamic: apiConfig.auth_is_dynamic,
+                auth_token_url: apiConfig.auth_token_url,
+                auth_client_id: apiConfig.auth_client_id,
+                auth_client_secret: apiConfig.auth_client_secret,
+                auth_grant_type: apiConfig.auth_grant_type,
+                auth_scope: apiConfig.auth_scope
             }, { headers: authHeaders });
 
             if (response.data.detectedColumns && Array.isArray(response.data.detectedColumns)) {
                 fetchedCols = response.data.detectedColumns;
             } else {
-                fetchedCols = []; // API conectou mas não achou array
+                fetchedCols = []; // Conectou mas não achou array ou colunas
             }
 
         // === CENÁRIO 3: ARQUIVO CSV ===
