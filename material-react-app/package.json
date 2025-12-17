@@ -71,5 +71,11 @@
     "eslint-plugin-react-hooks": "^4.3.0",
     "prettier": "^3.0.3"
   },
+  "overrides": {
+    "nth-check": "^2.1.1",
+    "postcss": "^8.4.31",
+    "svgo": "3.0.2",
+    "resolve-url-loader": "^5.0.0"
+  },
   "homepage": "/mind-the-gap/"
 }
