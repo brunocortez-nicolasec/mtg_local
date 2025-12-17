@@ -1,3 +1,5 @@
+// material-react-app/src/layouts/observabilidade/sistemas/components/RHDataSourceModal.js
+
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import axios from "axios"; 
@@ -18,6 +20,8 @@ import Switch from "@mui/material/Switch";
 import Divider from "@mui/material/Divider";
 import Icon from "@mui/material/Icon";
 import CircularProgress from "@mui/material/CircularProgress";
+import InputAdornment from "@mui/material/InputAdornment";
+import IconButton from "@mui/material/IconButton";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
@@ -84,6 +88,9 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   const [isTesting, setIsTesting] = useState(false);
   const [isFetchingToken, setIsFetchingToken] = useState(false);
   
+  // State: Controle de visibilidade de senhas por campo
+  const [showPasswords, setShowPasswords] = useState({});
+
   const API_URL = process.env.REACT_APP_API_URL;
 
   const api = axios.create({
@@ -94,6 +101,8 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
   useEffect(() => {
     if (open) {
       setTestStatus({ show: false });
+      setShowPasswords({}); 
+      
       if (initialData) {
         const config = initialData.hrConfig || {};
 
@@ -181,6 +190,35 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
         [name]: type === 'checkbox' ? checked : value 
     }));
   };
+
+  const handleClickShowPassword = (field) => {
+    setShowPasswords((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const handleMouseDownPassword = (event) => {
+    event.preventDefault();
+  };
+
+  // Helper para gerar props de input de senha
+  const getPasswordInputProps = (fieldName) => ({
+    type: showPasswords[fieldName] ? "text" : "password",
+    InputProps: {
+        endAdornment: (
+            <InputAdornment position="end">
+                <IconButton
+                    onClick={() => handleClickShowPassword(fieldName)}
+                    onMouseDown={handleMouseDownPassword}
+                    edge="end"
+                >
+                    {/* CORREÇÃO APLICADA: removido variant="button" e adicionado fontSize="small" para padronizar tamanho */}
+                    <MDTypography color="text" sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Icon fontSize="small">{showPasswords[fieldName] ? "visibility" : "visibility_off"}</Icon>
+                    </MDTypography>
+                </IconButton>
+            </InputAdornment>
+        )
+    }
+  });
   
   const handleAutocompleteChange = (name, newValue) => {
     setFormData((prev) => {
@@ -480,7 +518,16 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                             <Grid item xs={12} md={4}><MDInput label="Porta" name="db_port" value={formData.db_port} onChange={handleInputChange} fullWidth placeholder="5432" /></Grid>
                             <Grid item xs={12} md={6}><MDInput label={dbNameLabel} name="db_name" value={formData.db_name} onChange={handleInputChange} fullWidth /></Grid>
                             <Grid item xs={12} md={6}><MDInput label="Usuário" name="db_user" value={formData.db_user} onChange={handleInputChange} fullWidth /></Grid>
-                            <Grid item xs={12}><MDInput label="Senha" name="db_password" value={formData.db_password} type="password" onChange={handleInputChange} fullWidth /></Grid>
+                            <Grid item xs={12}>
+                                <MDInput 
+                                    label="Senha" 
+                                    name="db_password" 
+                                    value={formData.db_password} 
+                                    onChange={handleInputChange} 
+                                    fullWidth 
+                                    {...getPasswordInputProps("db_password")}
+                                />
+                            </Grid>
                         </>
                     ) : (
                         <>
@@ -493,12 +540,22 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                                     fullWidth 
                                     placeholder={isOracle ? "jdbc:oracle:thin:@host:1521/service_name" : "postgresql://user:pass@host:port/db"}
                                     helperText={isOracle ? "Para Oracle, use o formato Easy Connect (host:port/service)" : ""}
+                                    {...getPasswordInputProps("db_url")}
                                 />
                             </Grid>
                             {isOracle && (
                                 <>
                                     <Grid item xs={12} md={6}><MDInput label="Usuário" name="db_user" value={formData.db_user} onChange={handleInputChange} fullWidth /></Grid>
-                                    <Grid item xs={12} md={6}><MDInput label="Senha" name="db_password" value={formData.db_password} type="password" onChange={handleInputChange} fullWidth /></Grid>
+                                    <Grid item xs={12} md={6}>
+                                        <MDInput 
+                                            label="Senha" 
+                                            name="db_password" 
+                                            value={formData.db_password} 
+                                            onChange={handleInputChange} 
+                                            fullWidth 
+                                            {...getPasswordInputProps("db_password")}
+                                        />
+                                    </Grid>
                                 </>
                             )}
                         </>
@@ -563,7 +620,14 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                                         <MDInput label="Usuário" name="api_auth_user" value={formData.api_auth_user} onChange={handleInputChange} fullWidth />
                                      </Grid>
                                      <Grid item xs={12} md={4}>
-                                        <MDInput label="Senha" name="api_auth_password" value={formData.api_auth_password} type="password" onChange={handleInputChange} fullWidth />
+                                        <MDInput 
+                                            label="Senha" 
+                                            name="api_auth_password" 
+                                            value={formData.api_auth_password} 
+                                            onChange={handleInputChange} 
+                                            fullWidth 
+                                            {...getPasswordInputProps("api_auth_password")}
+                                        />
                                      </Grid>
                                  </>
                              )}
@@ -612,7 +676,14 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                                          <MDInput label="Client ID" name="auth_client_id" value={formData.auth_client_id} onChange={handleInputChange} fullWidth />
                                      </Grid>
                                      <Grid item xs={12} md={6}>
-                                         <MDInput label="Client Secret" name="auth_client_secret" value={formData.auth_client_secret} onChange={handleInputChange} fullWidth type="password" />
+                                         <MDInput 
+                                            label="Client Secret" 
+                                            name="auth_client_secret" 
+                                            value={formData.auth_client_secret} 
+                                            onChange={handleInputChange} 
+                                            fullWidth 
+                                            {...getPasswordInputProps("auth_client_secret")}
+                                         />
                                      </Grid>
                                      <Grid item xs={12} md={12}>
                                          <MDInput label="Scope (Opcional)" name="auth_scope" value={formData.auth_scope} onChange={handleInputChange} fullWidth placeholder="read write" />
@@ -625,7 +696,7 @@ function RHDataSourceModal({ open, onClose, onSave, initialData }) {
                                             onClick={handleFetchToken}
                                             disabled={isFetchingToken}
                                          >
-                                             {isFetchingToken ? <CircularProgress size={16} /> : "Gerar Token"}
+                                              {isFetchingToken ? <CircularProgress size={16} /> : "Gerar Token"}
                                          </MDButton>
                                      </Grid>
                                      <Grid item xs={12}><Divider sx={{my: 1}} /></Grid>

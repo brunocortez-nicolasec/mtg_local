@@ -10,7 +10,7 @@ RUN npm install
 
 COPY prisma ./prisma/
 
-COPY certs/nicolasec-WIN.cer /usr/local/share/ca-certificates/nicolasec-WIN.crt
+COPY certs/forgetru.crt /usr/local/share/ca-certificates/forgetru.crt
 
 RUN npx prisma generate
 

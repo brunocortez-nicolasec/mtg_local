@@ -1,3 +1,5 @@
+// material-react-app/src/layouts/observabilidade/sistemas/components/SistemaDataSourceModal.js
+
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import axios from "axios"; 
@@ -18,6 +20,8 @@ import Divider from "@mui/material/Divider";
 import Icon from "@mui/material/Icon";
 import Switch from "@mui/material/Switch";
 import CircularProgress from "@mui/material/CircularProgress"; 
+import InputAdornment from "@mui/material/InputAdornment";
+import IconButton from "@mui/material/IconButton";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
@@ -36,6 +40,9 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
   const [step, setStep] = useState(1); 
   const [isCreatingSystem, setIsCreatingSystem] = useState(false);
   
+  // --- NOVO STATE: Controle de visibilidade de senhas por campo ---
+  const [showPasswords, setShowPasswords] = useState({});
+
   const defaultState = {
     name: "",
     origem: "SISTEMA",
@@ -107,6 +114,9 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
   
   useEffect(() => {
     if (open) {
+      // Reseta a visibilidade das senhas ao abrir
+      setShowPasswords({});
+
       if (initialData) {
         setStep(2); 
         const config = initialData.systemConfig || {};
@@ -217,6 +227,34 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
         [name]: type === 'checkbox' ? checked : value 
     }));
   };
+
+  // --- FUNÇÕES DE TOGGLE SENHA (IGUAL RH) ---
+  const handleClickShowPassword = (field) => {
+    setShowPasswords((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const handleMouseDownPassword = (event) => {
+    event.preventDefault();
+  };
+
+  const getPasswordInputProps = (fieldName) => ({
+    type: showPasswords[fieldName] ? "text" : "password",
+    InputProps: {
+        endAdornment: (
+            <InputAdornment position="end">
+                <IconButton
+                    onClick={() => handleClickShowPassword(fieldName)}
+                    onMouseDown={handleMouseDownPassword}
+                    edge="end"
+                >
+                    <MDTypography color="text" sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Icon fontSize="small">{showPasswords[fieldName] ? "visibility" : "visibility_off"}</Icon>
+                    </MDTypography>
+                </IconButton>
+            </InputAdornment>
+        )
+    }
+  });
   
   const handleAutocompleteChange = (name, newValue) => {
     setFormData((prev) => {
@@ -516,7 +554,14 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
                         <MDInput label="Usuário" name="api_auth_user" value={formData.api_auth_user} onChange={handleInputChange} fullWidth />
                         </Grid>
                         <Grid item xs={12} md={4}>
-                        <MDInput label="Senha" name="api_auth_password" value={formData.api_auth_password} type="password" onChange={handleInputChange} fullWidth />
+                        <MDInput 
+                            label="Senha" 
+                            name="api_auth_password" 
+                            value={formData.api_auth_password} 
+                            onChange={handleInputChange} 
+                            fullWidth 
+                            {...getPasswordInputProps("api_auth_password")}
+                        />
                         </Grid>
                     </>
                 )}
@@ -565,7 +610,14 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
                             <MDInput label="Client ID" name="auth_client_id" value={formData.auth_client_id} onChange={handleInputChange} fullWidth />
                         </Grid>
                         <Grid item xs={12} md={6}>
-                            <MDInput label="Client Secret" name="auth_client_secret" value={formData.auth_client_secret} onChange={handleInputChange} fullWidth type="password" />
+                            <MDInput 
+                                label="Client Secret" 
+                                name="auth_client_secret" 
+                                value={formData.auth_client_secret} 
+                                onChange={handleInputChange} 
+                                fullWidth 
+                                {...getPasswordInputProps("auth_client_secret")}
+                            />
                         </Grid>
                         <Grid item xs={12} md={12}>
                             <MDInput label="Scope (Opcional)" name="auth_scope" value={formData.auth_scope} onChange={handleInputChange} fullWidth placeholder="read write" />
@@ -633,7 +685,6 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
   );
 
   const renderDbFields = () => {
-    /* (Mantido igual) */
     const isOracle = formData.db_type === 'oracle';
     const dbNameLabel = isOracle ? "Service Name / SID" : "Nome do Banco";
     const schemaPlaceholder = isOracle ? "USUARIO (Schema)" : "public";
@@ -659,15 +710,43 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
                     <Grid item xs={12} md={4}><MDInput label="Porta" name="db_port" value={formData.db_port} onChange={handleInputChange} fullWidth /></Grid>
                     <Grid item xs={12} md={6}><MDInput label={dbNameLabel} name="db_name" value={formData.db_name} onChange={handleInputChange} fullWidth /></Grid>
                     <Grid item xs={12} md={6}><MDInput label="User" name="db_user" value={formData.db_user} onChange={handleInputChange} fullWidth /></Grid>
-                    <Grid item xs={12}><MDInput label="Senha" name="db_password" value={formData.db_password} type="password" onChange={handleInputChange} fullWidth /></Grid>
+                    <Grid item xs={12}>
+                        <MDInput 
+                            label="Senha" 
+                            name="db_password" 
+                            value={formData.db_password} 
+                            onChange={handleInputChange} 
+                            fullWidth 
+                            {...getPasswordInputProps("db_password")}
+                        />
+                    </Grid>
                 </>
             ) : (
                 <>
-                    <Grid item xs={12}><MDInput label="URL" name="db_url" value={formData.db_url} onChange={handleInputChange} fullWidth placeholder={urlPlaceholder} /></Grid>
+                    <Grid item xs={12}>
+                        <MDInput 
+                            label="URL" 
+                            name="db_url" 
+                            value={formData.db_url} 
+                            onChange={handleInputChange} 
+                            fullWidth 
+                            placeholder={urlPlaceholder}
+                            {...getPasswordInputProps("db_url")}
+                        />
+                    </Grid>
                     {isOracle && (
                         <>
                             <Grid item xs={6}><MDInput label="User" name="db_user" value={formData.db_user} onChange={handleInputChange} fullWidth /></Grid>
-                            <Grid item xs={6}><MDInput label="Senha" name="db_password" value={formData.db_password} type="password" onChange={handleInputChange} fullWidth /></Grid>
+                            <Grid item xs={6}>
+                                <MDInput 
+                                    label="Senha" 
+                                    name="db_password" 
+                                    value={formData.db_password} 
+                                    onChange={handleInputChange} 
+                                    fullWidth 
+                                    {...getPasswordInputProps("db_password")}
+                                />
+                            </Grid>
                         </>
                     )}
                 </>
@@ -725,8 +804,8 @@ function SistemaDataSourceModal({ open, onClose, onSave, initialData }) {
                 {/* --- API OPTIONS --- */}
                 {showApiOptions && (
                     <>
-                       <Grid item xs={12}><Divider sx={{my: 1}} /><MDTypography variant="h6" fontWeight="medium">Configuração API (Global)</MDTypography></Grid>
-                       {renderCommonApiFields()}
+                        <Grid item xs={12}><Divider sx={{my: 1}} /><MDTypography variant="h6" fontWeight="medium">Configuração API (Global)</MDTypography></Grid>
+                        {renderCommonApiFields()}
                     </>
                 )}
 

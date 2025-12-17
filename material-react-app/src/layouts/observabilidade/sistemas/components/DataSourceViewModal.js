@@ -16,7 +16,29 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDBadge from "components/MDBadge";
 
-// Componente Helper
+// --- FUNÇÃO HELPER DE MÁSCARA (NOVO) ---
+const maskConnectionString = (connectionString) => {
+  if (!connectionString) return "";
+  try {
+    // Tenta parsear como URL padrão (ex: postgres://user:pass@host...)
+    const url = new URL(connectionString);
+    if (url.password) {
+      url.password = "******"; // Substitui a senha
+      return url.toString(); // Reconstrói a string mascarada
+    }
+    return connectionString;
+  } catch (error) {
+    // Fallback: Se não for uma URL padrão web, tenta regex simples para capturar pattern :password@
+    // Isso ajuda caso a string seja algo como jdbc:oracle:...
+    try {
+        return connectionString.replace(/(?<=:)([^:/@]+)(?=@)/g, "******");
+    } catch (regexError) {
+        return connectionString; // Em último caso, retorna original para não quebrar a tela
+    }
+  }
+};
+
+// Componente Helper de Item
 function DetailItem({ icon, label, value, darkMode, children }) {
   const valueColor = darkMode ? "white" : "text.secondary";
 
@@ -99,12 +121,14 @@ function DataSourceViewModal({ open, onClose, dataSource, darkMode }) {
       details["Método de Conexão"] = config.db_connection_type === 'URL' ? "URL de Conexão" : "Host / Porta";
 
       if (config.db_connection_type === 'URL') {
-          details["URL de Conexão"] = config.db_url;
+          // APLICA A MÁSCARA AQUI
+          details["URL de Conexão"] = maskConnectionString(config.db_url);
       } else {
           details["Host"] = config.db_host;
           details["Porta"] = config.db_port;
           details["Nome do Banco"] = config.db_name;
           details["Usuário DB"] = config.db_user;
+          // Note que não exibimos db_password aqui, o que já está correto/seguro
       }
       details["Schema Padrão"] = config.db_schema || "public";
       return details;

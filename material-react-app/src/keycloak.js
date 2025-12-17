@@ -3,9 +3,9 @@ import Keycloak from "keycloak-js";
 
 // Configuração de conexão com o servidor Keycloak (Dados Reais)
 const keycloakConfig = {
-  url: "https://tas.nicolasec.com.br/truam", 
+  url: "https://nicolasec.forgetru.com.br/truam", 
   realm: "TAS",
-  clientId: "mindTheGapTas",
+  clientId: "mindTheGap",
 };
 
 const keycloak = new Keycloak(keycloakConfig);

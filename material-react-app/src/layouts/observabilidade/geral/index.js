@@ -526,11 +526,9 @@ function VisaoGeral() {
     };
 
 const handlePieChartClick = (event, elements) => {
-        // CORREÇÃO: O Chart.js envia (event, elements).
         // Aqui garantimos que pegamos o array correto, seja ele o segundo argumento ou o primeiro (fallback).
         const activeElements = elements || (Array.isArray(event) ? event : []);
 
-        // CORREÇÃO DE ERRO: "elements[0] is undefined"
         // Se não houver elementos clicados (clique no fundo branco) ou o array for vazio, paramos.
         if (!activeElements || activeElements.length === 0) return;
 
