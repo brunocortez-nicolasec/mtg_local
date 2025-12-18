@@ -150,7 +150,7 @@ if (!isProduction) {
     https.createServer(httpsOptions, app).listen(PORT, () => {
       console.log(`✅ Servidor Local HTTPS rodando na porta ${PORT}`);
       console.log(`🔗 Link Local: https://localhost:${PORT}`);
-      console.log(`🔗 Link Rede:  https://192.168.0.109:${PORT}`); // Ajustado para seu IP atual
+      console.log(`🔗 Link Rede:  https://192.168.0.111:${PORT}`); // Ajustado para seu IP atual
     });
 
   } catch (error) {
